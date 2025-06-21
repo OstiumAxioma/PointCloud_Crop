@@ -1,6 +1,6 @@
-# VTK Qt 项目
+# 点云处理应用
 
-这是一个基于VTK 8.2.0和Qt 5.12.9的3D可视化项目模板。
+这是一个基于VTK 8.2.0和Qt 5.12.9的点云可视化与处理应用，支持PLY文件导入、3D可视化、矩形框选和点云高亮功能。
 
 ## 项目结构
 
@@ -8,18 +8,25 @@
 PointCloud_Crop/
 ├── CMakeLists.txt          # CMake配置文件
 ├── build.bat              # Windows构建脚本
+├── generate_vscode_config.py # VSCode配置生成脚本
 ├── README.md              # 项目说明
 ├── header/                # 头文件目录
-│   └── mainwindow.h       # 主窗口头文件
+│   ├── mainwindow.h       # 主窗口头文件
+│   ├── pointcloudviewer.h # 点云查看器头文件
+│   ├── fileimporter.h     # 文件导入器头文件
+│   └── rectangleselector.h # 矩形选择器头文件
 └── src/                   # 源文件目录
     ├── main.cpp           # 主程序入口
     ├── mainwindow.cpp     # 主窗口实现
-    └── mainwindow.ui      # Qt Designer UI文件
+    ├── mainwindow.ui      # Qt Designer UI文件
+    ├── pointcloudviewer.cpp # 点云查看器实现
+    ├── fileimporter.cpp   # 文件导入器实现
+    └── rectangleselector.cpp # 矩形选择器实现
 ```
 
 ## 环境要求
 
-- **VTK**: 8.2.0 (安装在 `D:\Compile\VTK\VTK-Qt\install\VTK820`)
+- **VTK**: 8.2.0 (安装在 `D:\code\vtk8.2.0\VTK-8.2.0`)
 - **Qt**: 5.12.9 (安装在 `C:\Qt\Qt5.12.9\5.12.9\msvc2017_64`)
 - **编译器**: Visual Studio 2022 或更高版本
 - **CMake**: 3.14 或更高版本
@@ -47,56 +54,68 @@ cmake --build . --config Release
 
 ## 功能特性
 
-- **3D可视化**: 使用VTK进行3D图形渲染
-- **Qt界面**: 现代化的Qt用户界面
-- **交互式操作**: 支持鼠标交互和3D场景操作
-- **菜单系统**: 包含文件和帮助菜单
-- **工具栏**: 提供快速操作按钮
-- **状态栏**: 显示操作状态信息
+- **PLY文件导入**: 支持导入PLY格式的点云文件
+- **3D可视化**: 使用VTK进行点云3D渲染，支持Z轴渐变色显示
+- **矩形框选**: 支持鼠标拖拽矩形框选点云
+- **点云高亮**: 选中的点以红色高亮显示
+- **交互式操作**: 支持鼠标旋转、平移、缩放3D场景
+- **Qt界面**: 现代化的Qt用户界面，包含菜单、工具栏和状态栏
 
-## 默认功能
+## 核心功能
 
-项目启动时会自动显示一个3D球体，您可以通过以下方式与程序交互：
+### 点云导入与显示
+- 通过菜单或工具栏导入PLY文件
+- 自动根据Z坐标生成渐变色显示
+- 支持点云统计信息显示（点数、面片数、Z范围）
 
-- **鼠标操作**: 
-  - 左键拖拽：旋转视角
-  - 中键拖拽：平移视角
-  - 滚轮：缩放
+### 矩形选择功能
+- 点击"矩形选择"按钮启用选择模式
+- 鼠标拖拽绘制选择框
+- 实时显示选择框，不随3D场景旋转
+- 支持多次选择，选中点累积高亮
 
-- **菜单操作**:
-  - 文件 → 退出：关闭程序
-  - 帮助 → 关于：显示关于信息
+### 选择管理
+- 选中点以红色高亮显示
+- 支持清除所有选中点，恢复原始颜色
+- 选中状态持久保存，直到手动清除
 
-- **工具栏操作**:
-  - 创建球体：在场景中添加新的球体
+## 数据流路径
 
-## 自定义开发
+### 选择过程
+1. `PerformPointSelection()` → 检测哪些点在选择框内
+2. 将新选中的点ID添加到 `selectedPointIds` 向量中
+3. `selectedPointIds.insert(selectedPointIds.end(), newSelectedPointIds.begin(), newSelectedPointIds.end());`
 
-### 添加新的VTK对象
-在 `mainwindow.cpp` 中添加新的方法来创建不同的VTK对象，例如：
+### 高亮显示
+1. `HighlightSelectedPoints(selectedPointIds)` → 根据ID列表修改点云颜色
+2. 直接修改 `originalPointData` 中对应点的颜色为红色
+3. 未选中的点保持原始渐变色
 
-```cpp
-void MainWindow::createCube()
-{
-    // 创建立方体源
-    auto cubeSource = vtkSmartPointer<vtkCubeSource>::New();
-    
-    // 创建映射器
-    auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-    mapper->SetInputConnection(cubeSource->GetOutputPort());
-    
-    // 创建演员
-    auto actor = vtkSmartPointer<vtkActor>::New();
-    actor->SetMapper(mapper);
-    
-    // 添加到渲染器
-    renderer->AddActor(actor);
-    renderWindow->Render();
-}
-```
+### 清除选择
+1. `ClearAllSelectedPoints()` → 清空 `selectedPointIds` 并恢复原始颜色
+2. 从 `originalColorBackup` 恢复所有点的原始颜色
 
-### 修改UI界面
-使用Qt Designer编辑 `src/mainwindow.ui` 文件来自定义界面布局。
+## 技术架构
+
+### 主要类说明
+- **MainWindow**: 主窗口，负责UI和信号槽连接
+- **PointCloudViewer**: 点云查看器，集成VTK渲染窗口
+- **FileImporter**: 文件导入器，处理PLY文件选择
+- **RectangleSelector**: 矩形选择器，实现点云选择功能
+
+### 数据存储
+- 选中点存储在 `RectangleSelector::selectedPointIds` 中（点ID列表）
+- 原始颜色备份在 `RectangleSelector::originalColorBackup` 中
+- 点云数据通过 `vtkPolyData` 管理
+
+## 使用方法
+
+1. **启动应用**: 运行构建后的可执行文件
+2. **导入点云**: 点击"导入PLY"按钮选择PLY文件
+3. **启用选择**: 点击"矩形选择"按钮启用选择模式
+4. **选择点云**: 在点云上拖拽鼠标绘制选择框
+5. **查看结果**: 选中的点会以红色高亮显示
+6. **清除选择**: 点击"清除选择"按钮恢复原始显示
 
 ## 故障排除
 
@@ -105,12 +124,14 @@ void MainWindow::createCube()
 1. **VTK路径错误**: 确保VTK_DIR路径正确指向您的VTK安装目录
 2. **Qt路径错误**: 确保Qt5_DIR路径正确指向您的Qt安装目录
 3. **编译器版本**: 确保使用与Qt和VTK兼容的编译器版本
+4. **PLY文件格式**: 确保PLY文件格式正确，包含点坐标数据
 
 ### 调试信息
 如果构建失败，请检查：
 - CMake错误信息
 - 编译器错误信息
 - 路径配置是否正确
+- VTK和Qt版本兼容性
 
 ## 许可证
 
