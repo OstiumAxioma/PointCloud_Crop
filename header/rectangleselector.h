@@ -17,6 +17,12 @@
 #include <vtkGlyph3D.h>
 #include <vtkUnsignedCharArray.h>
 #include <vtkPointData.h>
+#include <vtkActor2D.h>
+#include <vtkPolyDataMapper2D.h>
+#include <vtkCoordinate.h>
+#include <vtkProperty2D.h>
+#include <vtkLookupTable.h>
+#include <vtkDataArray.h>
 #include <QObject>
 #include <functional>
 
@@ -85,8 +91,11 @@ private:
 
     std::function<void(Qt::CursorShape)> cursorCallback;
     
-    // 跟踪选中的点ID
+    // 选中的点ID列表
     std::vector<vtkIdType> selectedPointIds;
+    
+    // 原始颜色备份
+    std::vector<unsigned char> originalColorBackup;
 };
 
 #endif // RECTANGLESELECTOR_H 

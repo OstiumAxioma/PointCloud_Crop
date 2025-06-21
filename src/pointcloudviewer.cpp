@@ -110,9 +110,14 @@ bool PointCloudViewer::importPLYFile(const QString &fileName)
         pointCount = plyReader->GetOutput()->GetNumberOfPoints();
         cellCount = plyReader->GetOutput()->GetNumberOfCells();
 
-        // 设置矩形选择器的点云数据
+        // 设置矩形选择器的点云数据（使用带有颜色数据的elevationFilter输出）
         if (rectangleSelector) {
-            rectangleSelector->SetPointCloudData(plyReader->GetOutput());
+            vtkPolyData* coloredPointData = vtkPolyData::SafeDownCast(elevationFilter->GetOutput());
+            if (coloredPointData) {
+                rectangleSelector->SetPointCloudData(coloredPointData);
+            } else {
+                qDebug() << "无法获取带颜色的点云数据";
+            }
         }
 
         QString message = QString("PLY文件加载成功！点数: %1, 面片数: %2, Z范围: %3 - %4")

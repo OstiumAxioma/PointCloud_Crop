@@ -82,12 +82,32 @@ void RectangleSelector::EnableRectangleSelection(bool enable)
 
 void RectangleSelector::ClearAllSelectedPoints()
 {
-    if (renderer) {
-        // 只清除选中的点，不清除选择框（选择框应该已经自动消失了）
-        renderer->RemoveActor(selectionActor);
-        selectedPointIds.clear();
-        renderer->GetRenderWindow()->Render();
+    if (!renderer || !originalPointData || originalColorBackup.empty()) return;
+    
+    // 获取原始点云的颜色数据
+    vtkUnsignedCharArray* originalColors = vtkUnsignedCharArray::SafeDownCast(
+        originalPointData->GetPointData()->GetScalars());
+    
+    if (!originalColors) return;
+    
+    // 恢复所有点的原始颜色
+    for (vtkIdType i = 0; i < originalColors->GetNumberOfTuples(); ++i) {
+        unsigned char* color = originalColors->GetPointer(i * 3);
+        color[0] = originalColorBackup[i * 3];
+        color[1] = originalColorBackup[i * 3 + 1];
+        color[2] = originalColorBackup[i * 3 + 2];
     }
+    
+    // 标记颜色数据已修改
+    originalColors->Modified();
+    
+    // 清空选中点列表
+    selectedPointIds.clear();
+    
+    // 刷新渲染
+    renderer->GetRenderWindow()->Render();
+    
+    qDebug() << "已清除所有选中点";
 }
 
 void RectangleSelector::OnLeftButtonDown()
@@ -245,46 +265,94 @@ void RectangleSelector::PerformPointSelection()
 
 void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)
 {
-    if (selectedPointIds.empty() || !renderer) return;
-    
-    // 创建选中点的数据
-    vtkSmartPointer<vtkPoints> selectedPoints = vtkSmartPointer<vtkPoints>::New();
-    vtkSmartPointer<vtkUnsignedCharArray> colors = vtkSmartPointer<vtkUnsignedCharArray>::New();
-    colors->SetNumberOfComponents(3);
-    colors->SetName("Colors");
-    
-    vtkPoints* originalPoints = originalPointData->GetPoints();
-    
-    for (vtkIdType id : selectedPointIds) {
-        double point[3];
-        originalPoints->GetPoint(id, point);
-        selectedPoints->InsertNextPoint(point);
-        
-        // 设置红色高亮
-        unsigned char color[3] = {255, 0, 0}; // 红色
-        colors->InsertNextTypedTuple(color);
+    if (!renderer || !originalPointData) return;
+
+    // 获取原始点云的颜色数据或标量数据
+    vtkUnsignedCharArray* originalColors = vtkUnsignedCharArray::SafeDownCast(
+        originalPointData->GetPointData()->GetScalars());
+
+    // 如果没有颜色数据，尝试从标量数据创建颜色
+    if (!originalColors) {
+        vtkDataArray* scalars = originalPointData->GetPointData()->GetScalars();
+        if (scalars) {
+            qDebug() << "找到标量数据，正在转换为颜色数据...";
+
+            // 创建颜色数组
+            vtkSmartPointer<vtkUnsignedCharArray> colors = vtkSmartPointer<vtkUnsignedCharArray>::New();
+            colors->SetNumberOfComponents(3);
+            colors->SetName("Colors");
+            colors->SetNumberOfTuples(scalars->GetNumberOfTuples());
+
+            // 创建查找表来将标量值转换为颜色
+            vtkSmartPointer<vtkLookupTable> lut = vtkSmartPointer<vtkLookupTable>::New();
+            lut->SetHueRange(0.667, 0.0); // 蓝色到红色
+            lut->SetSaturationRange(1.0, 1.0);
+            lut->SetValueRange(1.0, 1.0);
+            lut->Build();
+
+            // 获取标量范围
+            double range[2];
+            scalars->GetRange(range);
+
+            // 为所有点分配颜色
+            for (vtkIdType i = 0; i < scalars->GetNumberOfTuples(); ++i) {
+                double scalarValue = scalars->GetTuple1(i);
+                double normalizedValue = (scalarValue - range[0]) / (range[1] - range[0]);
+                double color[3];
+                lut->GetColor(normalizedValue, color);
+                unsigned char rgb[3];
+                rgb[0] = static_cast<unsigned char>(color[0] * 255);
+                rgb[1] = static_cast<unsigned char>(color[1] * 255);
+                rgb[2] = static_cast<unsigned char>(color[2] * 255);
+                colors->SetTypedTuple(i, rgb);
+            }
+
+            // 将颜色数据添加到点云
+            originalPointData->GetPointData()->SetScalars(colors);
+            originalColors = colors;
+
+            qDebug() << "已创建颜色数据，点数:" << colors->GetNumberOfTuples();
+        } else {
+            qDebug() << "原始点云既没有颜色数据也没有标量数据";
+            return;
+        }
     }
-    
-    // 创建选中点的多边形数据
-    selectionPolyData->SetPoints(selectedPoints);
-    selectionPolyData->GetPointData()->SetScalars(colors);
-    
-    // 创建球体字形来显示点
-    vtkSmartPointer<vtkSphereSource> sphere = vtkSmartPointer<vtkSphereSource>::New();
-    sphere->SetRadius(0.1); // 点的大小
-    sphere->SetPhiResolution(8);
-    sphere->SetThetaResolution(8);
-    
-    vtkSmartPointer<vtkGlyph3D> glyph = vtkSmartPointer<vtkGlyph3D>::New();
-    glyph->SetInputData(selectionPolyData);
-    glyph->SetSourceConnection(sphere->GetOutputPort());
-    glyph->SetColorModeToColorByScalar();
-    glyph->SetScaleModeToDataScalingOff();
-    
-    // 更新映射器
-    selectionMapper->SetInputConnection(glyph->GetOutputPort());
-    
-    // 添加到渲染器
-    renderer->AddActor(selectionActor);
+
+    // 保存原始颜色（如果还没有保存）
+    if (originalColorBackup.empty()) {
+        originalColorBackup.resize(originalColors->GetNumberOfTuples() * 3);
+        for (vtkIdType i = 0; i < originalColors->GetNumberOfTuples(); ++i) {
+            unsigned char* color = originalColors->GetPointer(i * 3);
+            originalColorBackup[i * 3] = color[0];
+            originalColorBackup[i * 3 + 1] = color[1];
+            originalColorBackup[i * 3 + 2] = color[2];
+        }
+        qDebug() << "已保存原始颜色备份，点数:" << originalColors->GetNumberOfTuples();
+    }
+
+    // 先恢复所有点为原色
+    for (vtkIdType i = 0; i < originalColors->GetNumberOfTuples(); ++i) {
+        unsigned char* color = originalColors->GetPointer(i * 3);
+        color[0] = originalColorBackup[i * 3];
+        color[1] = originalColorBackup[i * 3 + 1];
+        color[2] = originalColorBackup[i * 3 + 2];
+    }
+
+    // 将选中的点设置为红色
+    for (vtkIdType id : selectedPointIds) {
+        if (id < originalColors->GetNumberOfTuples()) {
+            unsigned char* color = originalColors->GetPointer(id * 3);
+            color[0] = 255; // 红色
+            color[1] = 0;   // 绿色
+            color[2] = 0;   // 蓝色
+        }
+    }
+
+    // 标记颜色数据已修改
+    originalColors->Modified();
+
+    // 刷新渲染
     renderer->GetRenderWindow()->Render();
+
+    qDebug() << "已高亮" << selectedPointIds.size() << "个点";
 } 
