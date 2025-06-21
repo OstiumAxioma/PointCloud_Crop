@@ -34,8 +34,11 @@ public:
     void EnableRectangleSelection(bool enable);
     bool IsRectangleSelectionEnabled() const { return rectangleSelectionEnabled; }
 
-    // 清除选择
-    void ClearSelection();
+    // 清除所有选中的点
+    void ClearAllSelectedPoints();
+    
+    // 获取当前选中的点数量
+    int GetSelectedPointCount() const { return selectedPointIds.size(); }
     
     // 设置光标回调函数
     void SetCursorCallback(std::function<void(Qt::CursorShape)> callback) {
@@ -81,6 +84,9 @@ private:
     vtkSmartPointer<vtkPolyDataMapper> rectangleMapper;
 
     std::function<void(Qt::CursorShape)> cursorCallback;
+    
+    // 跟踪选中的点ID
+    std::vector<vtkIdType> selectedPointIds;
 };
 
 #endif // RECTANGLESELECTOR_H 

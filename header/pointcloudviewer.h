@@ -44,7 +44,7 @@ public:
     
     // 矩形选择功能
     void enableRectangleSelection(bool enable);
-    void clearSelection();
+    void clearAllSelectedPoints();
 
 signals:
     // 导入完成信号

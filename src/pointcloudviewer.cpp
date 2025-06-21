@@ -174,9 +174,9 @@ void PointCloudViewer::enableRectangleSelection(bool enable)
     }
 }
 
-void PointCloudViewer::clearSelection()
+void PointCloudViewer::clearAllSelectedPoints()
 {
     if (rectangleSelector) {
-        rectangleSelector->ClearSelection();
+        rectangleSelector->ClearAllSelectedPoints();
     }
 } 

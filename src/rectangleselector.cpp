@@ -16,7 +16,7 @@
 #include <vtkPointData.h>
 #include <vtkLookupTable.h>
 #include <vtkMath.h>
-#include <iostream>
+#include <QDebug>
 
 vtkStandardNewMacro(RectangleSelector);
 
@@ -68,16 +68,14 @@ void RectangleSelector::SetPointCloudData(vtkPolyData* pointData)
 void RectangleSelector::EnableRectangleSelection(bool enable)
 {
     rectangleSelectionEnabled = enable;
-    if (!enable) {
-        ClearSelection();
-    }
 }
 
-void RectangleSelector::ClearSelection()
+void RectangleSelector::ClearAllSelectedPoints()
 {
     if (renderer) {
+        // 只清除选中的点，不清除选择框（选择框应该已经自动消失了）
         renderer->RemoveActor(selectionActor);
-        renderer->RemoveActor(rectangleActor);
+        selectedPointIds.clear();
         renderer->GetRenderWindow()->Render();
     }
 }
@@ -230,7 +228,7 @@ void RectangleSelector::PerformPointSelection()
     // 简化实现：使用屏幕坐标进行选择
     
     // 使用点选择器进行简化实现
-    std::vector<vtkIdType> selectedPointIds;
+    std::vector<vtkIdType> newSelectedPointIds;
     vtkPoints* points = originalPointData->GetPoints();
     
     for (vtkIdType i = 0; i < points->GetNumberOfPoints(); ++i) {
@@ -246,14 +244,17 @@ void RectangleSelector::PerformPointSelection()
         // 检查点是否在选择矩形内
         if (screenPoint[0] >= x1 && screenPoint[0] <= x2 &&
             screenPoint[1] >= y1 && screenPoint[1] <= y2) {
-            selectedPointIds.push_back(i);
+            newSelectedPointIds.push_back(i);
         }
     }
+    
+    // 将新选中的点添加到已选中的点列表中
+    selectedPointIds.insert(selectedPointIds.end(), newSelectedPointIds.begin(), newSelectedPointIds.end());
     
     // 高亮选中的点
     HighlightSelectedPoints(selectedPointIds);
     
-    std::cout << "选中了 " << selectedPointIds.size() << " 个点" << std::endl;
+    qDebug() << "选中了" << newSelectedPointIds.size() << "个点，总共选中" << selectedPointIds.size() << "个点";
 }
 
 void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)

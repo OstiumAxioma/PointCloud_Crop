@@ -153,6 +153,6 @@ void MainWindow::onRectangleSelection()
 
 void MainWindow::onClearSelection()
 {
-    pointCloudViewer->clearSelection();
-    statusBar()->showMessage("选择已清除", 2000);
+    pointCloudViewer->clearAllSelectedPoints();
+    statusBar()->showMessage("所有选中的点已清除", 2000);
 } 
