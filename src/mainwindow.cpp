@@ -47,6 +47,17 @@ void MainWindow::createActions()
     importPLYAct = new QAction("导入PLY(&I)", this);
     importPLYAct->setStatusTip("导入PLY点云文件");
     connect(importPLYAct, &QAction::triggered, this, &MainWindow::onImportPLY);
+
+    // 矩形选择动作
+    rectangleSelectionAct = new QAction("矩形选择(&R)", this);
+    rectangleSelectionAct->setStatusTip("启用矩形选择模式，拖拽鼠标选择点云");
+    rectangleSelectionAct->setCheckable(true);
+    connect(rectangleSelectionAct, &QAction::triggered, this, &MainWindow::onRectangleSelection);
+
+    // 清除选择动作
+    clearSelectionAct = new QAction("清除选择(&C)", this);
+    clearSelectionAct->setStatusTip("清除当前选中的点云");
+    connect(clearSelectionAct, &QAction::triggered, this, &MainWindow::onClearSelection);
 }
 
 void MainWindow::createMenus()
@@ -64,6 +75,9 @@ void MainWindow::createToolBars()
 {
     fileToolBar = addToolBar("文件");
     fileToolBar->addAction(importPLYAct);
+    fileToolBar->addSeparator();
+    fileToolBar->addAction(rectangleSelectionAct);
+    fileToolBar->addAction(clearSelectionAct);
     fileToolBar->addSeparator();
     fileToolBar->addAction(exitAct);
 }
@@ -123,4 +137,22 @@ void MainWindow::onImportCompleted(bool success, const QString &message)
         QMessageBox::warning(this, "错误", message);
         statusBar()->showMessage("导入失败", 3000);
     }
+}
+
+void MainWindow::onRectangleSelection()
+{
+    bool enabled = rectangleSelectionAct->isChecked();
+    pointCloudViewer->enableRectangleSelection(enabled);
+    
+    if (enabled) {
+        statusBar()->showMessage("矩形选择模式已启用，拖拽鼠标选择点云", 2000);
+    } else {
+        statusBar()->showMessage("矩形选择模式已禁用", 2000);
+    }
+}
+
+void MainWindow::onClearSelection()
+{
+    pointCloudViewer->clearSelection();
+    statusBar()->showMessage("选择已清除", 2000);
 } 

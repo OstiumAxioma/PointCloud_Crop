@@ -31,6 +31,8 @@ private slots:
     void onFileSelected(const QString &fileName);
     void onFileSelectionCancelled();
     void onImportCompleted(bool success, const QString &message);
+    void onRectangleSelection();
+    void onClearSelection();
 
 private:
     // UI组件
@@ -42,6 +44,8 @@ private:
     QAction *exitAct;
     QAction *aboutAct;
     QAction *importPLYAct;
+    QAction *rectangleSelectionAct;
+    QAction *clearSelectionAct;
 };
 
 #endif // MAINWINDOW_H 

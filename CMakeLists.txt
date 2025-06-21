@@ -46,6 +46,7 @@ set(SOURCES
     src/mainwindow.cpp
     src/pointcloudviewer.cpp
     src/fileimporter.cpp
+    src/rectangleselector.cpp
 )
 
 # 头文件
@@ -53,6 +54,7 @@ set(HEADERS
     header/mainwindow.h
     header/pointcloudviewer.h
     header/fileimporter.h
+    header/rectangleselector.h
 )
 
 # UI文件

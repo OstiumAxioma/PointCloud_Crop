@@ -30,10 +30,17 @@ bool PointCloudViewer::initializeVTK()
         renderWindowInteractor = renderWindow->GetInteractor();
         renderWindowInteractor->SetRenderWindow(renderWindow);
         
-        // 设置交互样式为轨迹球相机
-        vtkSmartPointer<vtkInteractorStyleTrackballCamera> style = 
-            vtkSmartPointer<vtkInteractorStyleTrackballCamera>::New();
-        renderWindowInteractor->SetInteractorStyle(style);
+        // 创建矩形选择器
+        rectangleSelector = vtkSmartPointer<RectangleSelector>::New();
+        rectangleSelector->SetRenderer(renderer);
+        
+        // 设置光标回调函数
+        rectangleSelector->SetCursorCallback([this](Qt::CursorShape cursor) {
+            this->setCursor(cursor);
+        });
+        
+        // 设置交互样式为矩形选择器
+        renderWindowInteractor->SetInteractorStyle(rectangleSelector);
         
         renderWindowInteractor->Initialize();
 
@@ -101,6 +108,11 @@ bool PointCloudViewer::importPLYFile(const QString &fileName)
         pointCount = plyReader->GetOutput()->GetNumberOfPoints();
         cellCount = plyReader->GetOutput()->GetNumberOfCells();
 
+        // 设置矩形选择器的点云数据
+        if (rectangleSelector) {
+            rectangleSelector->SetPointCloudData(plyReader->GetOutput());
+        }
+
         QString message = QString("PLY文件加载成功！点数: %1, 面片数: %2, Z范围: %3 - %4")
                          .arg(pointCount)
                          .arg(cellCount)
@@ -146,4 +158,25 @@ void PointCloudViewer::clearDisplay()
     cellCount = 0;
     zRangeMin = 0.0;
     zRangeMax = 0.0;
+}
+
+void PointCloudViewer::enableRectangleSelection(bool enable)
+{
+    if (rectangleSelector) {
+        rectangleSelector->EnableRectangleSelection(enable);
+        
+        // 设置光标
+        if (enable) {
+            this->setCursor(Qt::CrossCursor);
+        } else {
+            this->setCursor(Qt::ArrowCursor);
+        }
+    }
+}
+
+void PointCloudViewer::clearSelection()
+{
+    if (rectangleSelector) {
+        rectangleSelector->ClearSelection();
+    }
 } 
