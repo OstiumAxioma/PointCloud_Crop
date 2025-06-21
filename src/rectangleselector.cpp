@@ -28,26 +28,32 @@ RectangleSelector::RectangleSelector()
     , currentX(0)
     , currentY(0)
 {
-    // 初始化选择框相关对象
     rectanglePoints = vtkSmartPointer<vtkPoints>::New();
+    rectanglePoints->SetNumberOfPoints(4); // 固定4个点
     rectanglePolyData = vtkSmartPointer<vtkPolyData>::New();
-    rectangleActor = vtkSmartPointer<vtkActor>::New();
+    rectanglePolyData->SetPoints(rectanglePoints);
+    // 初始化线条
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    for (int i = 0; i < 4; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, (i+1)%4);
+        lines->InsertNextCell(line);
+    }
+    rectanglePolyData->SetLines(lines);
     rectangleMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+    rectangleMapper->SetInputData(rectanglePolyData);
+    rectangleActor = vtkSmartPointer<vtkActor>::New();
+    rectangleActor->SetMapper(rectangleMapper);
+    rectangleActor->GetProperty()->SetColor(1.0, 1.0, 0.0);
+    rectangleActor->GetProperty()->SetLineWidth(2.0);
     
     // 初始化选择结果相关对象
     selectionPolyData = vtkSmartPointer<vtkPolyData>::New();
     selectionMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
     selectionActor = vtkSmartPointer<vtkActor>::New();
-    
-    // 设置选择框的样式
-    rectangleActor->SetMapper(rectangleMapper);
-    rectangleActor->GetProperty()->SetColor(1.0, 1.0, 0.0); // 黄色边框
-    rectangleActor->GetProperty()->SetLineWidth(2.0);
-    rectangleActor->GetProperty()->SetRepresentationToWireframe();
-    
-    // 设置选中点的样式
     selectionActor->SetMapper(selectionMapper);
-    selectionActor->GetProperty()->SetColor(1.0, 0.0, 0.0); // 红色高亮
+    selectionActor->GetProperty()->SetColor(1.0, 0.0, 0.0);
     selectionActor->GetProperty()->SetPointSize(3.0);
 }
 
@@ -58,6 +64,10 @@ RectangleSelector::~RectangleSelector()
 void RectangleSelector::SetRenderer(vtkRenderer* ren)
 {
     renderer = ren;
+    if (renderer) {
+        renderer->AddActor(rectangleActor);
+        rectangleActor->SetVisibility(0); // 初始隐藏
+    }
 }
 
 void RectangleSelector::SetPointCloudData(vtkPolyData* pointData)
@@ -83,21 +93,19 @@ void RectangleSelector::ClearAllSelectedPoints()
 void RectangleSelector::OnLeftButtonDown()
 {
     if (!rectangleSelectionEnabled) {
-        // 如果矩形选择未启用，使用默认的轨迹球相机交互
         vtkInteractorStyleTrackballCamera::OnLeftButtonDown();
         return;
     }
     
-    // 开始矩形选择
     isSelecting = true;
     this->GetInteractor()->GetEventPosition(startX, startY);
     currentX = startX;
     currentY = startY;
     
-    // 清除之前的选择
-    ClearSelectionRectangle();
+    // 显示选择框
+    rectangleActor->SetVisibility(1);
+    DrawSelectionRectangle();
     
-    // 调用光标回调函数
     if (cursorCallback) {
         cursorCallback(Qt::CrossCursor);
     }
@@ -110,16 +118,13 @@ void RectangleSelector::OnLeftButtonUp()
         return;
     }
     
-    // 结束矩形选择
     isSelecting = false;
-    
-    // 执行点云选择
     PerformPointSelection();
     
-    // 清除选择框
-    ClearSelectionRectangle();
+    // 隐藏选择框
+    rectangleActor->SetVisibility(0);
+    renderer->GetRenderWindow()->Render();
     
-    // 调用光标回调函数
     if (cursorCallback) {
         cursorCallback(Qt::CrossCursor);
     }
@@ -132,68 +137,49 @@ void RectangleSelector::OnMouseMove()
         return;
     }
     
-    // 更新当前鼠标位置
     this->GetInteractor()->GetEventPosition(currentX, currentY);
-    
-    // 绘制选择矩形
     DrawSelectionRectangle();
 }
 
 void RectangleSelector::DrawSelectionRectangle()
 {
     if (!renderer) return;
-    
-    // 清除之前的选择框
-    ClearSelectionRectangle();
-    
-    // 创建矩形的四个顶点
-    rectanglePoints->Reset();
-    rectanglePoints->InsertNextPoint(startX, startY, 0);
-    rectanglePoints->InsertNextPoint(currentX, startY, 0);
-    rectanglePoints->InsertNextPoint(currentX, currentY, 0);
-    rectanglePoints->InsertNextPoint(startX, currentY, 0);
-    
-    // 创建矩形线条
-    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
-    
-    // 添加四条边
-    vtkSmartPointer<vtkLine> line1 = vtkSmartPointer<vtkLine>::New();
-    line1->GetPointIds()->SetId(0, 0);
-    line1->GetPointIds()->SetId(1, 1);
-    
-    vtkSmartPointer<vtkLine> line2 = vtkSmartPointer<vtkLine>::New();
-    line2->GetPointIds()->SetId(0, 1);
-    line2->GetPointIds()->SetId(1, 2);
-    
-    vtkSmartPointer<vtkLine> line3 = vtkSmartPointer<vtkLine>::New();
-    line3->GetPointIds()->SetId(0, 2);
-    line3->GetPointIds()->SetId(1, 3);
-    
-    vtkSmartPointer<vtkLine> line4 = vtkSmartPointer<vtkLine>::New();
-    line4->GetPointIds()->SetId(0, 3);
-    line4->GetPointIds()->SetId(1, 0);
-    
-    lines->InsertNextCell(line1);
-    lines->InsertNextCell(line2);
-    lines->InsertNextCell(line3);
-    lines->InsertNextCell(line4);
-    
-    // 设置多边形数据
-    rectanglePolyData->SetPoints(rectanglePoints);
-    rectanglePolyData->SetLines(lines);
-    
-    // 更新映射器
-    rectangleMapper->SetInputData(rectanglePolyData);
-    
-    // 添加到渲染器
-    renderer->AddActor(rectangleActor);
+    // 获取渲染窗口大小
+    vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
+    int* size = renderWindow->GetSize();
+    int x1 = std::max(0, std::min(startX, currentX));
+    int x2 = std::min(size[0], std::max(startX, currentX));
+    int y1 = std::max(0, std::min(startY, currentY));
+    int y2 = std::min(size[1], std::max(startY, currentY));
+    vtkCamera* camera = renderer->GetActiveCamera();
+    double* bounds = renderer->ComputeVisiblePropBounds();
+    double worldPoint1[4], worldPoint2[4], worldPoint3[4], worldPoint4[4];
+    renderer->SetDisplayPoint(x1, y1, 0);
+    renderer->DisplayToWorld();
+    renderer->GetWorldPoint(worldPoint1);
+    renderer->SetDisplayPoint(x2, y1, 0);
+    renderer->DisplayToWorld();
+    renderer->GetWorldPoint(worldPoint2);
+    renderer->SetDisplayPoint(x2, y2, 0);
+    renderer->DisplayToWorld();
+    renderer->GetWorldPoint(worldPoint3);
+    renderer->SetDisplayPoint(x1, y2, 0);
+    renderer->DisplayToWorld();
+    renderer->GetWorldPoint(worldPoint4);
+    // 只更新点坐标
+    rectanglePoints->SetPoint(0, worldPoint1[0], worldPoint1[1], worldPoint1[2]);
+    rectanglePoints->SetPoint(1, worldPoint2[0], worldPoint2[1], worldPoint2[2]);
+    rectanglePoints->SetPoint(2, worldPoint3[0], worldPoint3[1], worldPoint3[2]);
+    rectanglePoints->SetPoint(3, worldPoint4[0], worldPoint4[1], worldPoint4[2]);
+    rectanglePoints->Modified();
+    rectanglePolyData->Modified();
     renderer->GetRenderWindow()->Render();
 }
 
 void RectangleSelector::ClearSelectionRectangle()
 {
     if (renderer) {
-        renderer->RemoveActor(rectangleActor);
+        rectangleActor->SetVisibility(0);
         renderer->GetRenderWindow()->Render();
     }
 }

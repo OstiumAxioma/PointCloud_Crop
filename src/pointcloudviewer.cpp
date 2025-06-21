@@ -92,8 +92,10 @@ bool PointCloudViewer::importPLYFile(const QString &fileName)
         actor = vtkSmartPointer<vtkActor>::New();
         actor->SetMapper(mapper);
 
-        // 清除之前的演员
-        renderer->RemoveAllViewProps();
+        // 清除之前的点云演员（保留选择框）
+        if (actor) {
+            renderer->RemoveActor(actor);
+        }
 
         // 添加演员到渲染器
         renderer->AddActor(actor);
