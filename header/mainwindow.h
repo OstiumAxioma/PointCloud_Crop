@@ -1,22 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-// VTK模块初始化 - 解决 "no override found for 'vtkRenderer'" 错误
-#include <vtkAutoInit.h>
-VTK_MODULE_INIT(vtkRenderingOpenGL2)
-VTK_MODULE_INIT(vtkInteractionStyle)
-
 #include <QMainWindow>
-#include <QVTKOpenGLWidget.h>
-#include <vtkSmartPointer.h>
-#include <vtkRenderer.h>
-#include <vtkRenderWindow.h>
-#include <vtkRenderWindowInteractor.h>
-#include <vtkActor.h>
-#include <vtkPolyDataMapper.h>
-#include <vtkPLYReader.h>
-#include <vtkVertexGlyphFilter.h>
-#include <vtkElevationFilter.h>
+#include "pointcloudviewer.h"
+#include "fileimporter.h"
 
 QT_BEGIN_NAMESPACE
 class QAction;
@@ -39,29 +26,22 @@ private slots:
     void createMenus();
     void createToolBars();
     void createStatusBar();
-    void setupSimpleWidget();
-    void setupVTKWidget();
-    void importPLY();
+    void setupUI();
+    void onImportPLY();
+    void onFileSelected(const QString &fileName);
+    void onFileSelectionCancelled();
+    void onImportCompleted(bool success, const QString &message);
 
 private:
     // UI组件
-    QVTKOpenGLWidget *vtkWidget;
+    PointCloudViewer *pointCloudViewer;
+    FileImporter *fileImporter;
     QMenu *fileMenu;
     QMenu *helpMenu;
     QToolBar *fileToolBar;
     QAction *exitAct;
     QAction *aboutAct;
     QAction *importPLYAct;
-
-    // VTK组件
-    vtkSmartPointer<vtkRenderer> renderer;
-    vtkSmartPointer<vtkRenderWindow> renderWindow;
-    vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor;
-    vtkSmartPointer<vtkActor> actor;
-    vtkSmartPointer<vtkPolyDataMapper> mapper;
-    vtkSmartPointer<vtkPLYReader> plyReader;
-    vtkSmartPointer<vtkVertexGlyphFilter> glyphFilter;
-    vtkSmartPointer<vtkElevationFilter> elevationFilter;
 };
 
 #endif // MAINWINDOW_H 

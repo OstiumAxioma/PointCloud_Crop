@@ -44,11 +44,15 @@ set(CMAKE_AUTOUIC_SEARCH_PATHS ${CMAKE_CURRENT_SOURCE_DIR})
 set(SOURCES
     src/main.cpp
     src/mainwindow.cpp
+    src/pointcloudviewer.cpp
+    src/fileimporter.cpp
 )
 
 # 头文件
 set(HEADERS
     header/mainwindow.h
+    header/pointcloudviewer.h
+    header/fileimporter.h
 )
 
 # UI文件
