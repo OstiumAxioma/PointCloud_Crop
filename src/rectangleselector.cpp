@@ -41,12 +41,17 @@ RectangleSelector::RectangleSelector()
         lines->InsertNextCell(line);
     }
     rectanglePolyData->SetLines(lines);
-    rectangleMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+    rectangleMapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
     rectangleMapper->SetInputData(rectanglePolyData);
-    rectangleActor = vtkSmartPointer<vtkActor>::New();
+    rectangleActor = vtkSmartPointer<vtkActor2D>::New();
     rectangleActor->SetMapper(rectangleMapper);
     rectangleActor->GetProperty()->SetColor(1.0, 1.0, 0.0);
     rectangleActor->GetProperty()->SetLineWidth(2.0);
+    
+    // 设置2D坐标系统为屏幕坐标
+    vtkSmartPointer<vtkCoordinate> coord = vtkSmartPointer<vtkCoordinate>::New();
+    coord->SetCoordinateSystem(0); // VTK_DISPLAY = 0，屏幕坐标
+    rectangleMapper->SetTransformCoordinate(coord);
     
     // 初始化选择结果相关对象
     selectionPolyData = vtkSmartPointer<vtkPolyData>::New();
@@ -65,7 +70,7 @@ void RectangleSelector::SetRenderer(vtkRenderer* ren)
 {
     renderer = ren;
     if (renderer) {
-        renderer->AddActor(rectangleActor);
+        renderer->AddActor2D(rectangleActor);
         rectangleActor->SetVisibility(0); // 初始隐藏
     }
 }
@@ -164,33 +169,27 @@ void RectangleSelector::OnMouseMove()
 void RectangleSelector::DrawSelectionRectangle()
 {
     if (!renderer) return;
+    
     // 获取渲染窗口大小
     vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
     int* size = renderWindow->GetSize();
+    
+    // 确保坐标在屏幕范围内
     int x1 = std::max(0, std::min(startX, currentX));
     int x2 = std::min(size[0], std::max(startX, currentX));
     int y1 = std::max(0, std::min(startY, currentY));
     int y2 = std::min(size[1], std::max(startY, currentY));
-    vtkCamera* camera = renderer->GetActiveCamera();
-    double* bounds = renderer->ComputeVisiblePropBounds();
-    double worldPoint1[4], worldPoint2[4], worldPoint3[4], worldPoint4[4];
-    renderer->SetDisplayPoint(x1, y1, 0);
-    renderer->DisplayToWorld();
-    renderer->GetWorldPoint(worldPoint1);
-    renderer->SetDisplayPoint(x2, y1, 0);
-    renderer->DisplayToWorld();
-    renderer->GetWorldPoint(worldPoint2);
-    renderer->SetDisplayPoint(x2, y2, 0);
-    renderer->DisplayToWorld();
-    renderer->GetWorldPoint(worldPoint3);
-    renderer->SetDisplayPoint(x1, y2, 0);
-    renderer->DisplayToWorld();
-    renderer->GetWorldPoint(worldPoint4);
-    // 只更新点坐标
-    rectanglePoints->SetPoint(0, worldPoint1[0], worldPoint1[1], worldPoint1[2]);
-    rectanglePoints->SetPoint(1, worldPoint2[0], worldPoint2[1], worldPoint2[2]);
-    rectanglePoints->SetPoint(2, worldPoint3[0], worldPoint3[1], worldPoint3[2]);
-    rectanglePoints->SetPoint(3, worldPoint4[0], worldPoint4[1], worldPoint4[2]);
+    
+    // 直接使用Qt的Y坐标，不进行翻转
+    int vtkY1 = y1;
+    int vtkY2 = y2;
+    
+    // 更新矩形顶点（使用屏幕坐标）
+    rectanglePoints->SetPoint(0, x2, vtkY1, 0);
+    rectanglePoints->SetPoint(1, x1, vtkY1, 0);
+    rectanglePoints->SetPoint(2, x1, vtkY2, 0);
+    rectanglePoints->SetPoint(3, x2, vtkY2, 0);
+    
     rectanglePoints->Modified();
     rectanglePolyData->Modified();
     renderer->GetRenderWindow()->Render();

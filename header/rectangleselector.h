@@ -86,8 +86,8 @@ private:
     // 选择框的四个角点
     vtkSmartPointer<vtkPoints> rectanglePoints;
     vtkSmartPointer<vtkPolyData> rectanglePolyData;
-    vtkSmartPointer<vtkActor> rectangleActor;
-    vtkSmartPointer<vtkPolyDataMapper> rectangleMapper;
+    vtkSmartPointer<vtkActor2D> rectangleActor;
+    vtkSmartPointer<vtkPolyDataMapper2D> rectangleMapper;
 
     std::function<void(Qt::CursorShape)> cursorCallback;
     
