@@ -14,7 +14,9 @@ VTK_MODULE_INIT(vtkInteractionStyle)
 #include <vtkRenderWindowInteractor.h>
 #include <vtkActor.h>
 #include <vtkPolyDataMapper.h>
-#include <vtkSphereSource.h>
+#include <vtkPLYReader.h>
+#include <vtkVertexGlyphFilter.h>
+#include <vtkElevationFilter.h>
 
 QT_BEGIN_NAMESPACE
 class QAction;
@@ -39,7 +41,7 @@ private slots:
     void createStatusBar();
     void setupSimpleWidget();
     void setupVTKWidget();
-    void createSphere();
+    void importPLY();
 
 private:
     // UI组件
@@ -49,7 +51,7 @@ private:
     QToolBar *fileToolBar;
     QAction *exitAct;
     QAction *aboutAct;
-    QAction *sphereAct;
+    QAction *importPLYAct;
 
     // VTK组件
     vtkSmartPointer<vtkRenderer> renderer;
@@ -57,7 +59,9 @@ private:
     vtkSmartPointer<vtkRenderWindowInteractor> renderWindowInteractor;
     vtkSmartPointer<vtkActor> actor;
     vtkSmartPointer<vtkPolyDataMapper> mapper;
-    vtkSmartPointer<vtkSphereSource> sphereSource;
+    vtkSmartPointer<vtkPLYReader> plyReader;
+    vtkSmartPointer<vtkVertexGlyphFilter> glyphFilter;
+    vtkSmartPointer<vtkElevationFilter> elevationFilter;
 };
 
 #endif // MAINWINDOW_H 
