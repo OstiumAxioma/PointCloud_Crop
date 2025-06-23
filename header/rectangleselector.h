@@ -25,6 +25,8 @@
 #include <vtkDataArray.h>
 #include <QObject>
 #include <functional>
+#include <vector>
+#include <map>
 
 class RectangleSelector : public vtkInteractorStyleTrackballCamera
 {
@@ -70,6 +72,14 @@ private:
     
     // 高亮选中的点
     void HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds);
+
+    // 遮挡检测相关方法
+    void PerformOcclusionAwareSelection();
+    std::vector<vtkIdType> FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints);
+    double CalculateScreenDistance(double x1, double y1, double x2, double y2);
+    bool IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
+                        const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                        double occlusionThreshold = 5.0);
 
     // 成员变量
     vtkSmartPointer<vtkRenderer> renderer;

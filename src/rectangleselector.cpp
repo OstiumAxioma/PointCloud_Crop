@@ -17,6 +17,8 @@
 #include <vtkLookupTable.h>
 #include <vtkMath.h>
 #include <QDebug>
+#include <algorithm>
+#include <cmath>
 
 vtkStandardNewMacro(RectangleSelector);
 
@@ -207,59 +209,8 @@ void RectangleSelector::PerformPointSelection()
 {
     if (!renderer || !originalPointData) return;
     
-    // 获取相机和视口信息
-    vtkCamera* camera = renderer->GetActiveCamera();
-    vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
-    int* size = renderWindow->GetSize();
-    
-    // 计算选择区域
-    double x1 = std::min(startX, currentX);
-    double x2 = std::max(startX, currentX);
-    double y1 = std::min(startY, currentY);
-    double y2 = std::max(startY, currentY);
-    
-    // 转换为标准化坐标
-    double nx1 = x1 / size[0];
-    double nx2 = x2 / size[0];
-    double ny1 = y1 / size[1];
-    double ny2 = y2 / size[1];
-    
-    // 创建视锥体选择器
-    vtkSmartPointer<vtkFrustumSelector> selector = vtkSmartPointer<vtkFrustumSelector>::New();
-    
-    // 设置选择区域
-    double frustum[24];
-    // 这里需要根据相机参数计算视锥体
-    // 简化实现：使用屏幕坐标进行选择
-    
-    // 使用点选择器进行简化实现
-    std::vector<vtkIdType> newSelectedPointIds;
-    vtkPoints* points = originalPointData->GetPoints();
-    
-    for (vtkIdType i = 0; i < points->GetNumberOfPoints(); ++i) {
-        double point[3];
-        points->GetPoint(i, point);
-        
-        // 将3D点投影到屏幕坐标
-        double screenPoint[3];
-        renderer->SetWorldPoint(point[0], point[1], point[2], 1.0);
-        renderer->WorldToDisplay();
-        renderer->GetDisplayPoint(screenPoint);
-        
-        // 检查点是否在选择矩形内
-        if (screenPoint[0] >= x1 && screenPoint[0] <= x2 &&
-            screenPoint[1] >= y1 && screenPoint[1] <= y2) {
-            newSelectedPointIds.push_back(i);
-        }
-    }
-    
-    // 将新选中的点添加到已选中的点列表中
-    selectedPointIds.insert(selectedPointIds.end(), newSelectedPointIds.begin(), newSelectedPointIds.end());
-    
-    // 高亮选中的点
-    HighlightSelectedPoints(selectedPointIds);
-    
-    qDebug() << "选中了" << newSelectedPointIds.size() << "个点，总共选中" << selectedPointIds.size() << "个点";
+    // 使用新的遮挡感知选择算法
+    PerformOcclusionAwareSelection();
 }
 
 void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)
@@ -354,4 +305,208 @@ void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& se
     renderer->GetRenderWindow()->Render();
 
     qDebug() << "已高亮" << selectedPointIds.size() << "个点";
+}
+
+void RectangleSelector::PerformOcclusionAwareSelection()
+{
+    if (!renderer || !originalPointData) return;
+    
+    // 获取相机和视口信息
+    vtkCamera* camera = renderer->GetActiveCamera();
+    vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
+    int* size = renderWindow->GetSize();
+    
+    // 计算选择区域
+    double x1 = std::min(startX, currentX);
+    double x2 = std::max(startX, currentX);
+    double y1 = std::min(startY, currentY);
+    double y2 = std::max(startY, currentY);
+    
+    // 获取相机位置
+    double cameraPos[3];
+    camera->GetPosition(cameraPos);
+    
+    // 收集选择区域内的候选点
+    std::vector<vtkIdType> candidatePoints;
+    std::map<vtkIdType, std::pair<double, double>> screenPositions; // pointId -> (screenX, screenY)
+    std::map<vtkIdType, double> distancesToCamera; // pointId -> distance to camera
+    
+    vtkPoints* points = originalPointData->GetPoints();
+    
+    for (vtkIdType i = 0; i < points->GetNumberOfPoints(); ++i) {
+        double point[3];
+        points->GetPoint(i, point);
+        
+        // 将3D点投影到屏幕坐标
+        double screenPoint[3];
+        renderer->SetWorldPoint(point[0], point[1], point[2], 1.0);
+        renderer->WorldToDisplay();
+        renderer->GetDisplayPoint(screenPoint);
+        
+        // 检查点是否在选择矩形内
+        if (screenPoint[0] >= x1 && screenPoint[0] <= x2 &&
+            screenPoint[1] >= y1 && screenPoint[1] <= y2) {
+            
+            candidatePoints.push_back(i);
+            screenPositions[i] = std::make_pair(screenPoint[0], screenPoint[1]);
+            
+            // 计算到相机的距离
+            double distance = sqrt(pow(point[0] - cameraPos[0], 2) + 
+                                 pow(point[1] - cameraPos[1], 2) + 
+                                 pow(point[2] - cameraPos[2], 2));
+            distancesToCamera[i] = distance;
+        }
+    }
+    
+    qDebug() << "选择区域内找到" << candidatePoints.size() << "个候选点";
+    
+    // 应用遮挡检测过滤
+    std::vector<vtkIdType> visiblePoints = FilterOccludedPoints(candidatePoints);
+    
+    // 将新选中的点添加到已选中的点列表中
+    selectedPointIds.insert(selectedPointIds.end(), visiblePoints.begin(), visiblePoints.end());
+    
+    // 高亮选中的点
+    HighlightSelectedPoints(selectedPointIds);
+    
+    qDebug() << "遮挡检测后选中了" << visiblePoints.size() << "个点，总共选中" << selectedPointIds.size() << "个点";
+}
+
+std::vector<vtkIdType> RectangleSelector::FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints)
+{
+    if (candidatePoints.empty()) return {};
+    
+    // 获取相机位置
+    vtkCamera* camera = renderer->GetActiveCamera();
+    double cameraPos[3];
+    camera->GetPosition(cameraPos);
+    
+    // 计算所有候选点的屏幕位置和到相机的距离
+    std::map<vtkIdType, std::pair<double, double>> screenPositions;
+    std::map<vtkIdType, double> distancesToCamera;
+    
+    vtkPoints* points = originalPointData->GetPoints();
+    
+    for (vtkIdType pointId : candidatePoints) {
+        double point[3];
+        points->GetPoint(pointId, point);
+        
+        // 投影到屏幕坐标
+        double screenPoint[3];
+        renderer->SetWorldPoint(point[0], point[1], point[2], 1.0);
+        renderer->WorldToDisplay();
+        renderer->GetDisplayPoint(screenPoint);
+        
+        screenPositions[pointId] = std::make_pair(screenPoint[0], screenPoint[1]);
+        
+        // 计算到相机的距离
+        double distance = sqrt(pow(point[0] - cameraPos[0], 2) + 
+                             pow(point[1] - cameraPos[1], 2) + 
+                             pow(point[2] - cameraPos[2], 2));
+        distancesToCamera[pointId] = distance;
+    }
+    
+    // 按距离排序（从近到远）
+    std::vector<vtkIdType> sortedPoints = candidatePoints;
+    std::sort(sortedPoints.begin(), sortedPoints.end(), 
+              [&distancesToCamera](vtkIdType a, vtkIdType b) {
+                  return distancesToCamera[a] < distancesToCamera[b];
+              });
+    
+    // 基于深度缓冲的遮挡检测
+    std::vector<vtkIdType> visiblePoints;
+    double pixelThreshold = 6.0; // 像素距离阈值
+    
+    // 创建深度缓冲区（简化为距离映射）
+    std::map<std::pair<int, int>, double> depthBuffer; // (pixelX, pixelY) -> minDistance
+    
+    for (vtkIdType pointId : sortedPoints) {
+        auto it = screenPositions.find(pointId);
+        if (it == screenPositions.end()) continue;
+        
+        double screenX = it->second.first;
+        double screenY = it->second.second;
+        double pointDistance = distancesToCamera[pointId];
+        
+        // 检查周围像素区域
+        bool isOccluded = false;
+        int pixelX = static_cast<int>(screenX);
+        int pixelY = static_cast<int>(screenY);
+        
+        // 检查周围区域是否已有更近的点
+        for (int dx = -static_cast<int>(pixelThreshold); dx <= static_cast<int>(pixelThreshold); ++dx) {
+            for (int dy = -static_cast<int>(pixelThreshold); dy <= static_cast<int>(pixelThreshold); ++dy) {
+                int checkX = pixelX + dx;
+                int checkY = pixelY + dy;
+                
+                auto bufferIt = depthBuffer.find(std::make_pair(checkX, checkY));
+                if (bufferIt != depthBuffer.end()) {
+                    double existingDistance = bufferIt->second;
+                    // 如果已有更近的点，且距离差异足够大，认为被遮挡
+                    if (existingDistance < pointDistance && 
+                        (pointDistance - existingDistance) / existingDistance > 0.02) {
+                        isOccluded = true;
+                        break;
+                    }
+                }
+            }
+            if (isOccluded) break;
+        }
+        
+        if (!isOccluded) {
+            visiblePoints.push_back(pointId);
+            
+            // 更新深度缓冲区
+            for (int dx = -static_cast<int>(pixelThreshold); dx <= static_cast<int>(pixelThreshold); ++dx) {
+                for (int dy = -static_cast<int>(pixelThreshold); dy <= static_cast<int>(pixelThreshold); ++dy) {
+                    int updateX = pixelX + dx;
+                    int updateY = pixelY + dy;
+                    
+                    auto bufferIt = depthBuffer.find(std::make_pair(updateX, updateY));
+                    if (bufferIt == depthBuffer.end() || bufferIt->second > pointDistance) {
+                        depthBuffer[std::make_pair(updateX, updateY)] = pointDistance;
+                    }
+                }
+            }
+        }
+    }
+    
+    return visiblePoints;
+}
+
+bool RectangleSelector::IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
+                                       const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                                       double occlusionThreshold)
+{
+    if (frontPoints.empty()) return false;
+    
+    auto it = screenPositions.find(pointId);
+    if (it == screenPositions.end()) return false;
+    
+    double pointX = it->second.first;
+    double pointY = it->second.second;
+    
+    // 检查是否被前面的点遮挡
+    for (vtkIdType frontPointId : frontPoints) {
+        auto frontIt = screenPositions.find(frontPointId);
+        if (frontIt == screenPositions.end()) continue;
+        
+        double frontX = frontIt->second.first;
+        double frontY = frontIt->second.second;
+        
+        // 计算屏幕距离
+        double distance = CalculateScreenDistance(pointX, pointY, frontX, frontY);
+        
+        // 如果距离小于阈值，认为被遮挡
+        if (distance < occlusionThreshold) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+double RectangleSelector::CalculateScreenDistance(double x1, double y1, double x2, double y2)
+{
+    return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
 } 
