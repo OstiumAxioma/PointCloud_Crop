@@ -34,6 +34,7 @@ private slots:
     void onRectangleSelection();
     void onCircleSelection();
     void onClearSelection();
+    void onOcclusionDetectionToggled(bool checked);
 
 private:
     // UI组件

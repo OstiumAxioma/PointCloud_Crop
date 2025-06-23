@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QTimer>
 #include <QLabel>
+#include <QCheckBox>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -85,6 +86,15 @@ void MainWindow::createToolBars()
     fileToolBar->addAction(rectangleSelectionAct);
     fileToolBar->addAction(circleSelectionAct);
     fileToolBar->addAction(clearSelectionAct);
+    fileToolBar->addSeparator();
+
+    // 添加遮挡检测的复选框
+    QCheckBox *occlusionCheckBox = new QCheckBox("启用深度选择", this);
+    occlusionCheckBox->setChecked(true); // 默认开启
+    occlusionCheckBox->setStatusTip("开启或关闭基于深度的遮挡检测选择模式");
+    connect(occlusionCheckBox, &QCheckBox::toggled, this, &MainWindow::onOcclusionDetectionToggled);
+    fileToolBar->addWidget(occlusionCheckBox);
+
     fileToolBar->addSeparator();
     fileToolBar->addAction(exitAct);
 }
@@ -186,4 +196,14 @@ void MainWindow::onClearSelection()
 {
     pointCloudViewer->clearAllSelectedPoints();
     statusBar()->showMessage("所有选中的点已清除", 2000);
+}
+
+void MainWindow::onOcclusionDetectionToggled(bool checked)
+{
+    pointCloudViewer->enableOcclusionDetection(checked);
+    if (checked) {
+        statusBar()->showMessage("深度选择已启用", 2000);
+    } else {
+        statusBar()->showMessage("深度选择已禁用", 2000);
+    }
 } 

@@ -48,6 +48,10 @@ public:
     void EnableRectangleSelection(bool enable);
     bool IsRectangleSelectionEnabled() const { return rectangleSelectionEnabled; }
 
+    // 启用/禁用遮挡检测
+    void EnableOcclusionDetection(bool enable) { occlusionDetectionEnabled = enable; }
+    bool IsOcclusionDetectionEnabled() const { return occlusionDetectionEnabled; }
+
     // 设置选择框形状
     void SetSelectionShape(SelectionShape shape) { selectionShape = shape; }
     SelectionShape GetSelectionShape() const { return selectionShape; }
@@ -93,7 +97,9 @@ private:
 
     // 遮挡检测相关方法
     void PerformOcclusionAwareSelection();
-    std::vector<vtkIdType> FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints);
+    std::vector<vtkIdType> FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints,
+                                                    const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                                                    const std::map<vtkIdType, double>& distancesToCamera);
     double CalculateScreenDistance(double x1, double y1, double x2, double y2);
     bool IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
                         const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
@@ -127,6 +133,9 @@ private:
     
     // 原始颜色备份
     std::vector<unsigned char> originalColorBackup;
+
+    // 遮挡检测标志
+    bool occlusionDetectionEnabled;
 
     SelectionShape selectionShape;
 };

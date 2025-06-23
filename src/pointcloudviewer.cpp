@@ -166,7 +166,7 @@ void PointCloudViewer::clearDisplay()
     zRangeMin = 0.0;
     zRangeMax = 0.0;
 }
-
+// 下面的方法用于切换选择框
 void PointCloudViewer::enableRectangleSelection(bool enable)
 {
     if (rectangleSelector) {
@@ -201,5 +201,12 @@ void PointCloudViewer::clearAllSelectedPoints()
 {
     if (rectangleSelector) {
         rectangleSelector->ClearAllSelectedPoints();
+    }
+}
+
+void PointCloudViewer::enableOcclusionDetection(bool enable)
+{
+    if (rectangleSelector) {
+        rectangleSelector->EnableOcclusionDetection(enable);
     }
 } 
