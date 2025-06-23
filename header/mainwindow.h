@@ -32,6 +32,7 @@ private slots:
     void onFileSelectionCancelled();
     void onImportCompleted(bool success, const QString &message);
     void onRectangleSelection();
+    void onCircleSelection();
     void onClearSelection();
 
 private:
@@ -45,6 +46,7 @@ private:
     QAction *aboutAct;
     QAction *importPLYAct;
     QAction *rectangleSelectionAct;
+    QAction *circleSelectionAct;
     QAction *clearSelectionAct;
 };
 

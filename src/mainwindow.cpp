@@ -54,6 +54,12 @@ void MainWindow::createActions()
     rectangleSelectionAct->setCheckable(true);
     connect(rectangleSelectionAct, &QAction::triggered, this, &MainWindow::onRectangleSelection);
 
+    // 圆形选择动作
+    circleSelectionAct = new QAction("圆形选择(&C)", this);
+    circleSelectionAct->setStatusTip("启用圆形选择模式，拖拽鼠标选择点云");
+    circleSelectionAct->setCheckable(true);
+    connect(circleSelectionAct, &QAction::triggered, this, &MainWindow::onCircleSelection);
+
     // 清除选择动作
     clearSelectionAct = new QAction("清除选择(&C)", this);
     clearSelectionAct->setStatusTip("清除当前选中的点云");
@@ -77,6 +83,7 @@ void MainWindow::createToolBars()
     fileToolBar->addAction(importPLYAct);
     fileToolBar->addSeparator();
     fileToolBar->addAction(rectangleSelectionAct);
+    fileToolBar->addAction(circleSelectionAct);
     fileToolBar->addAction(clearSelectionAct);
     fileToolBar->addSeparator();
     fileToolBar->addAction(exitAct);
@@ -142,12 +149,36 @@ void MainWindow::onImportCompleted(bool success, const QString &message)
 void MainWindow::onRectangleSelection()
 {
     bool enabled = rectangleSelectionAct->isChecked();
+    
+    // 如果启用矩形选择，则禁用圆形选择
+    if (enabled) {
+        circleSelectionAct->setChecked(false);
+    }
+    
     pointCloudViewer->enableRectangleSelection(enabled);
     
     if (enabled) {
         statusBar()->showMessage("矩形选择模式已启用，拖拽鼠标选择点云", 2000);
     } else {
         statusBar()->showMessage("矩形选择模式已禁用", 2000);
+    }
+}
+
+void MainWindow::onCircleSelection()
+{
+    bool enabled = circleSelectionAct->isChecked();
+    
+    // 如果启用圆形选择，则禁用矩形选择
+    if (enabled) {
+        rectangleSelectionAct->setChecked(false);
+    }
+    
+    pointCloudViewer->enableCircleSelection(enabled);
+    
+    if (enabled) {
+        statusBar()->showMessage("圆形选择模式已启用，拖拽鼠标选择点云", 2000);
+    } else {
+        statusBar()->showMessage("圆形选择模式已禁用", 2000);
     }
 }
 

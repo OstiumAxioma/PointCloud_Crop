@@ -170,6 +170,22 @@ void PointCloudViewer::clearDisplay()
 void PointCloudViewer::enableRectangleSelection(bool enable)
 {
     if (rectangleSelector) {
+         rectangleSelector->SetSelectionShape(SelectionShape::Rectangle);
+        rectangleSelector->EnableRectangleSelection(enable);
+        
+        // 设置光标
+        if (enable) {
+            this->setCursor(Qt::CrossCursor);
+        } else {
+            this->setCursor(Qt::ArrowCursor);
+        }
+    }
+}
+
+void PointCloudViewer::enableCircleSelection(bool enable)
+{
+    if (rectangleSelector) {
+        rectangleSelector->SetSelectionShape(SelectionShape::Circle);
         rectangleSelector->EnableRectangleSelection(enable);
         
         // 设置光标

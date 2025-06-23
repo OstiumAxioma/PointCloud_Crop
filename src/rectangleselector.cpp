@@ -191,11 +191,24 @@ void RectangleSelector::DrawSelectionRectangle()
     int vtkY1 = y1;
     int vtkY2 = y2;
     
+    // 重置点和线为矩形结构
+    rectanglePoints->SetNumberOfPoints(4);
+    
     // 更新矩形顶点（使用屏幕坐标）
     rectanglePoints->SetPoint(0, x2, vtkY1, 0);
     rectanglePoints->SetPoint(1, x1, vtkY1, 0);
     rectanglePoints->SetPoint(2, x1, vtkY2, 0);
     rectanglePoints->SetPoint(3, x2, vtkY2, 0);
+    
+    // 更新线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    for (int i = 0; i < 4; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, (i + 1) % 4);
+        lines->InsertNextCell(line);
+    }
+    rectanglePolyData->SetLines(lines);
     
     rectanglePoints->Modified();
     rectanglePolyData->Modified();
