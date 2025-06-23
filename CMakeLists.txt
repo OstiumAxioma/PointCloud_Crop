@@ -41,29 +41,29 @@ set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/header)
 set(CMAKE_AUTOUIC_SEARCH_PATHS ${CMAKE_CURRENT_SOURCE_DIR})
 
 # 源文件
-set(SOURCES
+set(PROJECT_SOURCES
     src/main.cpp
     src/mainwindow.cpp
     src/pointcloudviewer.cpp
     src/fileimporter.cpp
-    src/rectangleselector.cpp
+    src/selector.cpp
 )
 
 # 头文件
-set(HEADERS
+set(PROJECT_HEADERS
     header/mainwindow.h
     header/pointcloudviewer.h
     header/fileimporter.h
-    header/rectangleselector.h
+    header/selector.h
 )
 
 # UI文件
-set(FORMS
+set(PROJECT_UIS
     src/mainwindow.ui
 )
 
 # 添加可执行文件
-add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS} ${FORMS})
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} ${PROJECT_HEADERS} ${PROJECT_UIS})
 
 # 添加包含目录
 target_include_directories(${PROJECT_NAME} PRIVATE 
@@ -107,3 +107,6 @@ if(WIN32)
         COMMENT "正在部署Qt..."
     )
 endif()
+
+# 添加Qt的MOC, UIC, RCC
+qt_wrap_cpp(PROJECT_MOC_FILES ${PROJECT_HEADERS})

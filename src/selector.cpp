@@ -1,4 +1,4 @@
-#include "rectangleselector.h"
+#include "selector.h"
 #include <vtkLine.h>
 #include <vtkCellArray.h>
 #include <vtkProperty.h>
@@ -24,16 +24,16 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-vtkStandardNewMacro(RectangleSelector);
+vtkStandardNewMacro(Selector);
 
-RectangleSelector::RectangleSelector()
+Selector::Selector()
     : rectangleSelectionEnabled(false)
     , isSelecting(false)
     , startX(0)
     , startY(0)
     , currentX(0)
     , currentY(0)
-    , selectionShape(SelectionShape::Circle)
+    , selectionShape(SelectionShape::Rectangle)
 {
     rectanglePoints = vtkSmartPointer<vtkPoints>::New();
     rectanglePoints->SetNumberOfPoints(4); // 固定4个点
@@ -69,11 +69,11 @@ RectangleSelector::RectangleSelector()
     selectionActor->GetProperty()->SetPointSize(3.0);
 }
 
-RectangleSelector::~RectangleSelector()
+Selector::~Selector()
 {
 }
 
-void RectangleSelector::SetRenderer(vtkRenderer* ren)
+void Selector::SetRenderer(vtkRenderer* ren)
 {
     renderer = ren;
     if (renderer) {
@@ -82,17 +82,17 @@ void RectangleSelector::SetRenderer(vtkRenderer* ren)
     }
 }
 
-void RectangleSelector::SetPointCloudData(vtkPolyData* pointData)
+void Selector::SetPointCloudData(vtkPolyData* pointData)
 {
     originalPointData = pointData;
 }
 
-void RectangleSelector::EnableRectangleSelection(bool enable)
+void Selector::EnableRectangleSelection(bool enable)
 {
     rectangleSelectionEnabled = enable;
 }
 
-void RectangleSelector::ClearAllSelectedPoints()
+void Selector::ClearAllSelectedPoints()
 {
     if (!renderer || !originalPointData || originalColorBackup.empty()) return;
     
@@ -122,7 +122,7 @@ void RectangleSelector::ClearAllSelectedPoints()
     qDebug() << "已清除所有选中点";
 }
 
-void RectangleSelector::OnLeftButtonDown()
+void Selector::OnLeftButtonDown()
 {
     if (!rectangleSelectionEnabled) {
         vtkInteractorStyleTrackballCamera::OnLeftButtonDown();
@@ -143,7 +143,7 @@ void RectangleSelector::OnLeftButtonDown()
     }
 }
 
-void RectangleSelector::OnLeftButtonUp()
+void Selector::OnLeftButtonUp()
 {
     if (!rectangleSelectionEnabled || !isSelecting) {
         vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
@@ -162,7 +162,7 @@ void RectangleSelector::OnLeftButtonUp()
     }
 }
 
-void RectangleSelector::OnMouseMove()
+void Selector::OnMouseMove()
 {
     if (!rectangleSelectionEnabled || !isSelecting) {
         vtkInteractorStyleTrackballCamera::OnMouseMove();
@@ -173,7 +173,7 @@ void RectangleSelector::OnMouseMove()
     DrawSelectionShape();
 }
 
-void RectangleSelector::DrawSelectionRectangle()
+void Selector::DrawSelectionRectangle()
 {
     if (!renderer) return;
     
@@ -215,7 +215,7 @@ void RectangleSelector::DrawSelectionRectangle()
     renderer->GetRenderWindow()->Render();
 }
 
-void RectangleSelector::ClearSelectionRectangle()
+void Selector::ClearSelectionRectangle()
 {
     if (renderer) {
         rectangleActor->SetVisibility(0);
@@ -223,7 +223,7 @@ void RectangleSelector::ClearSelectionRectangle()
     }
 }
 
-void RectangleSelector::PerformPointSelection()
+void Selector::PerformPointSelection()
 {
     if (!renderer || !originalPointData) return;
     
@@ -231,7 +231,7 @@ void RectangleSelector::PerformPointSelection()
     PerformOcclusionAwareSelection();
 }
 
-void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)
+void Selector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)
 {
     if (!renderer || !originalPointData) return;
 
@@ -325,7 +325,7 @@ void RectangleSelector::HighlightSelectedPoints(const std::vector<vtkIdType>& se
     qDebug() << "已高亮" << selectedPointIds.size() << "个点";
 }
 
-void RectangleSelector::PerformOcclusionAwareSelection()
+void Selector::PerformOcclusionAwareSelection()
 {
     if (!renderer || !originalPointData) return;
     
@@ -382,7 +382,7 @@ void RectangleSelector::PerformOcclusionAwareSelection()
     qDebug() << "遮挡检测后选中了" << visiblePoints.size() << "个点，总共选中" << selectedPointIds.size() << "个点";
 }
 
-std::vector<vtkIdType> RectangleSelector::FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints)
+std::vector<vtkIdType> Selector::FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints)
 {
     if (candidatePoints.empty()) return {};
     
@@ -484,7 +484,7 @@ std::vector<vtkIdType> RectangleSelector::FilterOccludedPoints(const std::vector
     return visiblePoints;
 }
 
-bool RectangleSelector::IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
+bool Selector::IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
                                        const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
                                        double occlusionThreshold)
 {
@@ -516,13 +516,13 @@ bool RectangleSelector::IsPointOccluded(vtkIdType pointId, const std::vector<vtk
     return false;
 }
 
-double RectangleSelector::CalculateScreenDistance(double x1, double y1, double x2, double y2)
+double Selector::CalculateScreenDistance(double x1, double y1, double x2, double y2)
 {
     // 计算屏幕距离
     return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
 }
 
-void RectangleSelector::DrawSelectionShape()
+void Selector::DrawSelectionShape()
 {
     switch (selectionShape) {
         case SelectionShape::Rectangle:
@@ -534,7 +534,7 @@ void RectangleSelector::DrawSelectionShape()
     }
 }
 
-void RectangleSelector::ClearSelectionShape()
+void Selector::ClearSelectionShape()
 {
     switch (selectionShape) {
         case SelectionShape::Rectangle:
@@ -546,7 +546,7 @@ void RectangleSelector::ClearSelectionShape()
     }
 }
 
-void RectangleSelector::DrawSelectionCircle()
+void Selector::DrawSelectionCircle()
 {
     if (!renderer) return;
     
@@ -589,7 +589,7 @@ void RectangleSelector::DrawSelectionCircle()
     renderer->GetRenderWindow()->Render();
 }
 
-void RectangleSelector::ClearSelectionCircle()
+void Selector::ClearSelectionCircle()
 {
     if (renderer) {
         rectangleActor->SetVisibility(0);
@@ -597,7 +597,7 @@ void RectangleSelector::ClearSelectionCircle()
     }
 }
 
-bool RectangleSelector::IsPointInSelectionArea(double screenX, double screenY)
+bool Selector::IsPointInSelectionArea(double screenX, double screenY)
 {
     switch (selectionShape) {
         case SelectionShape::Rectangle: {

@@ -1,5 +1,5 @@
-#ifndef RECTANGLESELECTOR_H
-#define RECTANGLESELECTOR_H
+#ifndef SELECTOR_H
+#define SELECTOR_H
 
 #include <vtkInteractorStyleTrackballCamera.h>
 #include <vtkSmartPointer.h>
@@ -34,11 +34,11 @@ enum class SelectionShape {
     Circle
 };
 
-class RectangleSelector : public vtkInteractorStyleTrackballCamera
+class Selector : public vtkInteractorStyleTrackballCamera
 {
 public:
-    static RectangleSelector* New();
-    vtkTypeMacro(RectangleSelector, vtkInteractorStyleTrackballCamera);
+    static Selector* New();
+    vtkTypeMacro(Selector, vtkInteractorStyleTrackballCamera);
 
     // 设置渲染器和点云数据
     void SetRenderer(vtkRenderer* renderer);
@@ -56,7 +56,7 @@ public:
     void ClearAllSelectedPoints();
     
     // 获取当前选中的点数量
-    int GetSelectedPointCount() const { return selectedPointIds.size(); }
+    size_t GetSelectedPointCount() const { return selectedPointIds.size(); }
     
     // 设置光标回调函数
     void SetCursorCallback(std::function<void(Qt::CursorShape)> callback) {
@@ -64,8 +64,8 @@ public:
     }
 
 protected:
-    RectangleSelector();
-    ~RectangleSelector();
+    Selector();
+    ~Selector();
 
     // 鼠标事件处理
     virtual void OnLeftButtonDown() override;
@@ -131,4 +131,4 @@ private:
     SelectionShape selectionShape;
 };
 
-#endif // RECTANGLESELECTOR_H 
+#endif // SELECTOR_H 

@@ -31,7 +31,7 @@ bool PointCloudViewer::initializeVTK()
         renderWindowInteractor->SetRenderWindow(renderWindow);
         
         // 创建矩形选择器
-        rectangleSelector = vtkSmartPointer<RectangleSelector>::New();
+        rectangleSelector = vtkSmartPointer<Selector>::New();
         rectangleSelector->SetRenderer(renderer);
         
         // 设置光标回调函数
@@ -170,7 +170,7 @@ void PointCloudViewer::clearDisplay()
 void PointCloudViewer::enableRectangleSelection(bool enable)
 {
     if (rectangleSelector) {
-         rectangleSelector->SetSelectionShape(SelectionShape::Rectangle);
+        rectangleSelector->SetSelectionShape(SelectionShape::Rectangle);
         rectangleSelector->EnableRectangleSelection(enable);
         
         // 设置光标

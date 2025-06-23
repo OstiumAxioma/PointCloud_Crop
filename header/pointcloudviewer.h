@@ -17,7 +17,7 @@ VTK_MODULE_INIT(vtkInteractionStyle)
 #include <vtkVertexGlyphFilter.h>
 #include <vtkElevationFilter.h>
 #include <vtkInteractorStyleTrackballCamera.h>
-#include "rectangleselector.h"
+#include "selector.h"
 
 class PointCloudViewer : public QVTKOpenGLWidget
 {
@@ -63,7 +63,7 @@ private:
     vtkSmartPointer<vtkElevationFilter> elevationFilter;
     
     // 矩形选择器
-    vtkSmartPointer<RectangleSelector> rectangleSelector;
+    vtkSmartPointer<Selector> rectangleSelector;
     
     // 点云信息
     int pointCount;
