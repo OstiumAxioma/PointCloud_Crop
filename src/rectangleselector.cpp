@@ -20,6 +20,10 @@
 #include <algorithm>
 #include <cmath>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 vtkStandardNewMacro(RectangleSelector);
 
 RectangleSelector::RectangleSelector()
@@ -29,6 +33,7 @@ RectangleSelector::RectangleSelector()
     , startY(0)
     , currentX(0)
     , currentY(0)
+    , selectionShape(SelectionShape::Circle)
 {
     rectanglePoints = vtkSmartPointer<vtkPoints>::New();
     rectanglePoints->SetNumberOfPoints(4); // 固定4个点
@@ -131,7 +136,7 @@ void RectangleSelector::OnLeftButtonDown()
     
     // 显示选择框
     rectangleActor->SetVisibility(1);
-    DrawSelectionRectangle();
+    DrawSelectionShape();
     
     if (cursorCallback) {
         cursorCallback(Qt::CrossCursor);
@@ -165,7 +170,7 @@ void RectangleSelector::OnMouseMove()
     }
     
     this->GetInteractor()->GetEventPosition(currentX, currentY);
-    DrawSelectionRectangle();
+    DrawSelectionShape();
 }
 
 void RectangleSelector::DrawSelectionRectangle()
@@ -316,12 +321,6 @@ void RectangleSelector::PerformOcclusionAwareSelection()
     vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
     int* size = renderWindow->GetSize();
     
-    // 计算选择区域
-    double x1 = std::min(startX, currentX);
-    double x2 = std::max(startX, currentX);
-    double y1 = std::min(startY, currentY);
-    double y2 = std::max(startY, currentY);
-    
     // 获取相机位置
     double cameraPos[3];
     camera->GetPosition(cameraPos);
@@ -343,10 +342,8 @@ void RectangleSelector::PerformOcclusionAwareSelection()
         renderer->WorldToDisplay();
         renderer->GetDisplayPoint(screenPoint);
         
-        // 检查点是否在选择矩形内
-        if (screenPoint[0] >= x1 && screenPoint[0] <= x2 &&
-            screenPoint[1] >= y1 && screenPoint[1] <= y2) {
-            
+        // 使用通用的区域判断方法
+        if (IsPointInSelectionArea(screenPoint[0], screenPoint[1])) {
             candidatePoints.push_back(i);
             screenPositions[i] = std::make_pair(screenPoint[0], screenPoint[1]);
             
@@ -508,5 +505,107 @@ bool RectangleSelector::IsPointOccluded(vtkIdType pointId, const std::vector<vtk
 
 double RectangleSelector::CalculateScreenDistance(double x1, double y1, double x2, double y2)
 {
+    // 计算屏幕距离
     return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
+}
+
+void RectangleSelector::DrawSelectionShape()
+{
+    switch (selectionShape) {
+        case SelectionShape::Rectangle:
+            DrawSelectionRectangle();
+            break;
+        case SelectionShape::Circle:
+            DrawSelectionCircle();
+            break;
+    }
+}
+
+void RectangleSelector::ClearSelectionShape()
+{
+    switch (selectionShape) {
+        case SelectionShape::Rectangle:
+            ClearSelectionRectangle();
+            break;
+        case SelectionShape::Circle:
+            ClearSelectionCircle();
+            break;
+    }
+}
+
+void RectangleSelector::DrawSelectionCircle()
+{
+    if (!renderer) return;
+    
+    // 获取渲染窗口大小
+    vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
+    int* size = renderWindow->GetSize();
+    
+    // 计算圆心和半径
+    double centerX = (startX + currentX) / 2.0;
+    double centerY = (startY + currentY) / 2.0;
+    double radius = sqrt(pow(currentX - startX, 2) + pow(currentY - startY, 2)) / 2.0;
+    
+    // 确保圆心在屏幕范围内
+    centerX = std::max(radius, std::min(size[0] - radius, centerX));
+    centerY = std::max(radius, std::min(size[1] - radius, centerY));
+    
+    // 生成圆形点集（使用足够多的点来近似圆形）
+    const int numPoints = 64;
+    rectanglePoints->SetNumberOfPoints(numPoints);
+    
+    for (int i = 0; i < numPoints; ++i) {
+        double angle = 2.0 * M_PI * i / numPoints;
+        double x = centerX + radius * cos(angle);
+        double y = centerY + radius * sin(angle);
+        rectanglePoints->SetPoint(i, x, y, 0);
+    }
+    
+    // 更新线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    for (int i = 0; i < numPoints; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, (i + 1) % numPoints);
+        lines->InsertNextCell(line);
+    }
+    rectanglePolyData->SetLines(lines);
+    
+    rectanglePoints->Modified();
+    rectanglePolyData->Modified();
+    renderer->GetRenderWindow()->Render();
+}
+
+void RectangleSelector::ClearSelectionCircle()
+{
+    if (renderer) {
+        rectangleActor->SetVisibility(0);
+        renderer->GetRenderWindow()->Render();
+    }
+}
+
+bool RectangleSelector::IsPointInSelectionArea(double screenX, double screenY)
+{
+    switch (selectionShape) {
+        case SelectionShape::Rectangle: {
+            // 矩形选择区域
+            double x1 = std::min(startX, currentX);
+            double x2 = std::max(startX, currentX);
+            double y1 = std::min(startY, currentY);
+            double y2 = std::max(startY, currentY);
+            
+            return (screenX >= x1 && screenX <= x2 && screenY >= y1 && screenY <= y2);
+        }
+        case SelectionShape::Circle: {
+            // 圆形选择区域
+            double centerX = (startX + currentX) / 2.0;
+            double centerY = (startY + currentY) / 2.0;
+            double radius = sqrt(pow(currentX - startX, 2) + pow(currentY - startY, 2)) / 2.0;
+            
+            double distance = sqrt(pow(screenX - centerX, 2) + pow(screenY - centerY, 2));
+            return distance <= radius;
+        }
+        default:
+            return false;
+    }
 } 

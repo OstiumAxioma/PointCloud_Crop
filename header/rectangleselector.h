@@ -28,6 +28,12 @@
 #include <vector>
 #include <map>
 
+// 选择框形状枚举
+enum class SelectionShape {
+    Rectangle,
+    Circle
+};
+
 class RectangleSelector : public vtkInteractorStyleTrackballCamera
 {
 public:
@@ -41,6 +47,10 @@ public:
     // 启用/禁用矩形选择模式
     void EnableRectangleSelection(bool enable);
     bool IsRectangleSelectionEnabled() const { return rectangleSelectionEnabled; }
+
+    // 设置选择框形状
+    void SetSelectionShape(SelectionShape shape) { selectionShape = shape; }
+    SelectionShape GetSelectionShape() const { return selectionShape; }
 
     // 清除所有选中的点
     void ClearAllSelectedPoints();
@@ -67,6 +77,14 @@ private:
     void DrawSelectionRectangle();
     void ClearSelectionRectangle();
     
+    // 绘制选择圆形
+    void DrawSelectionCircle();
+    void ClearSelectionCircle();
+    
+    // 绘制选择框（通用方法）
+    void DrawSelectionShape();
+    void ClearSelectionShape();
+    
     // 执行点云选择
     void PerformPointSelection();
     
@@ -80,6 +98,9 @@ private:
     bool IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
                         const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
                         double occlusionThreshold = 5.0);
+    
+    // 判断点是否在选择区域内
+    bool IsPointInSelectionArea(double screenX, double screenY);
 
     // 成员变量
     vtkSmartPointer<vtkRenderer> renderer;
@@ -106,6 +127,8 @@ private:
     
     // 原始颜色备份
     std::vector<unsigned char> originalColorBackup;
+
+    SelectionShape selectionShape;
 };
 
 #endif // RECTANGLESELECTOR_H 
