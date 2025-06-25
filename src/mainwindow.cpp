@@ -63,7 +63,7 @@ void MainWindow::createActions()
 
     // 多边形选择动作
     polygonSelectionAct = new QAction("多边形选择(&P)", this);
-    polygonSelectionAct->setStatusTip("启用多边形选择模式，左键放置顶点，右键完成选择");
+    polygonSelectionAct->setStatusTip("启用多边形选择模式，左键放置顶点，Backspace撤销，右键完成选择");
     polygonSelectionAct->setCheckable(true);
     connect(polygonSelectionAct, &QAction::triggered, this, &MainWindow::onPolygonSelection);
 
@@ -214,7 +214,7 @@ void MainWindow::onPolygonSelection()
     pointCloudViewer->enablePolygonSelection(enabled);
     
     if (enabled) {
-        statusBar()->showMessage("多边形选择模式已启用，左键放置顶点，右键完成选择", 3000);
+        statusBar()->showMessage("多边形选择模式已启用，左键放置顶点，Backspace撤销，右键完成选择", 4000);
     } else {
         statusBar()->showMessage("多边形选择模式已禁用", 2000);
     }
