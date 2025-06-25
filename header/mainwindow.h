@@ -33,6 +33,7 @@ private slots:
     void onImportCompleted(bool success, const QString &message);
     void onRectangleSelection();
     void onCircleSelection();
+    void onPolygonSelection();
     void onClearSelection();
     void onOcclusionDetectionToggled(bool checked);
 
@@ -48,6 +49,7 @@ private:
     QAction *importPLYAct;
     QAction *rectangleSelectionAct;
     QAction *circleSelectionAct;
+    QAction *polygonSelectionAct;
     QAction *clearSelectionAct;
 };
 

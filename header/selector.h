@@ -31,7 +31,8 @@
 // 选择框形状枚举
 enum class SelectionShape {
     Rectangle,
-    Circle
+    Circle,
+    Polygon
 };
 
 class Selector : public vtkInteractorStyleTrackballCamera
@@ -74,6 +75,7 @@ protected:
     // 鼠标事件处理
     virtual void OnLeftButtonDown() override;
     virtual void OnLeftButtonUp() override;
+    virtual void OnRightButtonDown() override;
     virtual void OnMouseMove() override;
 
 private:
@@ -84,6 +86,13 @@ private:
     // 绘制选择圆形
     void DrawSelectionCircle();
     void ClearSelectionCircle();
+    
+    // 绘制选择多边形
+    void DrawSelectionPolygon();
+    void ClearSelectionPolygon();
+    void AddPolygonVertex(int x, int y);
+    void CompletePolygonSelection();
+    bool IsPointInPolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon);
     
     // 绘制选择框（通用方法）
     void DrawSelectionShape();
@@ -119,6 +128,10 @@ private:
     bool isSelecting;
     int startX, startY;
     int currentX, currentY;
+    
+    // 多边形相关变量
+    bool isDrawingPolygon;
+    std::vector<std::pair<int, int>> polygonVertices;
     
     // 选择框的四个角点
     vtkSmartPointer<vtkPoints> rectanglePoints;

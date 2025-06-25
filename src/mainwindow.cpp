@@ -61,6 +61,12 @@ void MainWindow::createActions()
     circleSelectionAct->setCheckable(true);
     connect(circleSelectionAct, &QAction::triggered, this, &MainWindow::onCircleSelection);
 
+    // 多边形选择动作
+    polygonSelectionAct = new QAction("多边形选择(&P)", this);
+    polygonSelectionAct->setStatusTip("启用多边形选择模式，左键放置顶点，右键完成选择");
+    polygonSelectionAct->setCheckable(true);
+    connect(polygonSelectionAct, &QAction::triggered, this, &MainWindow::onPolygonSelection);
+
     // 清除选择动作
     clearSelectionAct = new QAction("清除选择(&C)", this);
     clearSelectionAct->setStatusTip("清除当前选中的点云");
@@ -85,6 +91,7 @@ void MainWindow::createToolBars()
     fileToolBar->addSeparator();
     fileToolBar->addAction(rectangleSelectionAct);
     fileToolBar->addAction(circleSelectionAct);
+    fileToolBar->addAction(polygonSelectionAct);
     fileToolBar->addAction(clearSelectionAct);
     fileToolBar->addSeparator();
 
@@ -160,9 +167,10 @@ void MainWindow::onRectangleSelection()
 {
     bool enabled = rectangleSelectionAct->isChecked();
     
-    // 如果启用矩形选择，则禁用圆形选择
+    // 如果启用矩形选择，则禁用其他选择模式
     if (enabled) {
         circleSelectionAct->setChecked(false);
+        polygonSelectionAct->setChecked(false);
     }
     
     pointCloudViewer->enableRectangleSelection(enabled);
@@ -178,9 +186,10 @@ void MainWindow::onCircleSelection()
 {
     bool enabled = circleSelectionAct->isChecked();
     
-    // 如果启用圆形选择，则禁用矩形选择
+    // 如果启用圆形选择，则禁用其他选择模式
     if (enabled) {
         rectangleSelectionAct->setChecked(false);
+        polygonSelectionAct->setChecked(false);
     }
     
     pointCloudViewer->enableCircleSelection(enabled);
@@ -189,6 +198,25 @@ void MainWindow::onCircleSelection()
         statusBar()->showMessage("圆形选择模式已启用，拖拽鼠标选择点云", 2000);
     } else {
         statusBar()->showMessage("圆形选择模式已禁用", 2000);
+    }
+}
+
+void MainWindow::onPolygonSelection()
+{
+    bool enabled = polygonSelectionAct->isChecked();
+    
+    // 如果启用多边形选择，则禁用其他选择模式
+    if (enabled) {
+        rectangleSelectionAct->setChecked(false);
+        circleSelectionAct->setChecked(false);
+    }
+    
+    pointCloudViewer->enablePolygonSelection(enabled);
+    
+    if (enabled) {
+        statusBar()->showMessage("多边形选择模式已启用，左键放置顶点，右键完成选择", 3000);
+    } else {
+        statusBar()->showMessage("多边形选择模式已禁用", 2000);
     }
 }
 

@@ -35,6 +35,7 @@ Selector::Selector()
     , currentY(0)
     , selectionShape(SelectionShape::Rectangle)
     , occlusionDetectionEnabled(true)
+    , isDrawingPolygon(false)
 {
     rectanglePoints = vtkSmartPointer<vtkPoints>::New();
     rectanglePoints->SetNumberOfPoints(4); // 固定4个点
@@ -130,23 +131,55 @@ void Selector::OnLeftButtonDown()
         return;
     }
     
-    isSelecting = true;
-    this->GetInteractor()->GetEventPosition(startX, startY);
-    currentX = startX;
-    currentY = startY;
+    int x, y;
+    this->GetInteractor()->GetEventPosition(x, y);
     
-    // 显示选择框
-    rectangleActor->SetVisibility(1);
-    DrawSelectionShape();
-    
-    if (cursorCallback) {
-        cursorCallback(Qt::CrossCursor);
+    if (selectionShape == SelectionShape::Polygon) {
+        // 多边形模式下的左键处理
+        if (!isDrawingPolygon) {
+            // 开始绘制多边形
+            isDrawingPolygon = true;
+            polygonVertices.clear();
+            rectangleActor->SetVisibility(1);
+        }
+        
+        // 添加顶点
+        AddPolygonVertex(x, y);
+        
+        if (cursorCallback) {
+            cursorCallback(Qt::CrossCursor);
+        }
+    } else {
+        // 矩形和圆形模式的原有逻辑
+        isSelecting = true;
+        startX = x;
+        startY = y;
+        currentX = startX;
+        currentY = startY;
+        
+        // 显示选择框
+        rectangleActor->SetVisibility(1);
+        DrawSelectionShape();
+        
+        if (cursorCallback) {
+            cursorCallback(Qt::CrossCursor);
+        }
     }
 }
 
 void Selector::OnLeftButtonUp()
 {
-    if (!rectangleSelectionEnabled || !isSelecting) {
+    if (!rectangleSelectionEnabled) {
+        vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
+        return;
+    }
+    
+    if (selectionShape == SelectionShape::Polygon) {
+        // 多边形模式下左键抬起不执行选择，等待右键完成
+        return;
+    }
+    
+    if (!isSelecting) {
         vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
         return;
     }
@@ -163,15 +196,36 @@ void Selector::OnLeftButtonUp()
     }
 }
 
+void Selector::OnRightButtonDown()
+{
+    if (!rectangleSelectionEnabled) {
+        vtkInteractorStyleTrackballCamera::OnRightButtonDown();
+        return;
+    }
+    
+    if (selectionShape == SelectionShape::Polygon && isDrawingPolygon) {
+        // 完成多边形选择
+        CompletePolygonSelection();
+    } else {
+        vtkInteractorStyleTrackballCamera::OnRightButtonDown();
+    }
+}
+
 void Selector::OnMouseMove()
 {
-    if (!rectangleSelectionEnabled || !isSelecting) {
+    if (!rectangleSelectionEnabled || (!isSelecting && !isDrawingPolygon)) {
         vtkInteractorStyleTrackballCamera::OnMouseMove();
         return;
     }
     
-    this->GetInteractor()->GetEventPosition(currentX, currentY);
-    DrawSelectionShape();
+    if (selectionShape == SelectionShape::Polygon && isDrawingPolygon) {
+        // 多边形模式下的鼠标移动处理
+        this->GetInteractor()->GetEventPosition(currentX, currentY);
+        DrawSelectionPolygon();
+    } else if (isSelecting) {
+        this->GetInteractor()->GetEventPosition(currentX, currentY);
+        DrawSelectionShape();
+    }
 }
 
 void Selector::DrawSelectionRectangle()
@@ -513,6 +567,9 @@ void Selector::DrawSelectionShape()
         case SelectionShape::Circle:
             DrawSelectionCircle();
             break;
+        case SelectionShape::Polygon:
+            DrawSelectionPolygon();
+            break;
     }
 }
 
@@ -524,6 +581,9 @@ void Selector::ClearSelectionShape()
             break;
         case SelectionShape::Circle:
             ClearSelectionCircle();
+            break;
+        case SelectionShape::Polygon:
+            ClearSelectionPolygon();
             break;
     }
 }
@@ -600,7 +660,138 @@ bool Selector::IsPointInSelectionArea(double screenX, double screenY)
             double distance = sqrt(pow(screenX - centerX, 2) + pow(screenY - centerY, 2));
             return distance <= radius;
         }
+        case SelectionShape::Polygon: {
+            // 多边形选择区域
+            if (polygonVertices.size() < 3) return false;
+            
+            std::vector<std::pair<double, double>> polygon;
+            for (const auto& vertex : polygonVertices) {
+                polygon.emplace_back(vertex.first, vertex.second);
+            }
+            
+            return IsPointInPolygon(screenX, screenY, polygon);
+        }
         default:
             return false;
     }
-} 
+}
+
+void Selector::AddPolygonVertex(int x, int y)
+{
+    polygonVertices.emplace_back(x, y);
+    DrawSelectionPolygon();
+    qDebug() << "添加多边形顶点:" << x << "," << y << "，当前顶点数:" << polygonVertices.size();
+}
+
+void Selector::CompletePolygonSelection()
+{
+    if (polygonVertices.size() < 3) {
+        qDebug() << "多边形顶点数不足3个，无法完成选择";
+        return;
+    }
+    
+    isDrawingPolygon = false;
+    
+    // 执行点云选择
+    PerformPointSelection();
+    
+    // 隐藏选择框
+    rectangleActor->SetVisibility(0);
+    renderer->GetRenderWindow()->Render();
+    
+    // 清空顶点列表
+    polygonVertices.clear();
+    
+    if (cursorCallback) {
+        cursorCallback(Qt::ArrowCursor);
+    }
+    
+    qDebug() << "多边形选择完成";
+}
+
+void Selector::DrawSelectionPolygon()
+{
+    if (!renderer || polygonVertices.empty()) return;
+    
+    // 获取渲染窗口大小
+    vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
+    int* size = renderWindow->GetSize();
+    
+    // 至少需要当前鼠标位置来绘制临时多边形
+    std::vector<std::pair<int, int>> drawVertices = polygonVertices;
+    if (isDrawingPolygon) {
+        // 添加当前鼠标位置作为临时顶点
+        drawVertices.emplace_back(currentX, currentY);
+    }
+    
+    if (drawVertices.size() < 2) return;
+    
+    // 设置顶点数量
+    rectanglePoints->SetNumberOfPoints(drawVertices.size());
+    
+    // 更新顶点坐标
+    for (size_t i = 0; i < drawVertices.size(); ++i) {
+        int x = std::max(0, std::min(size[0], drawVertices[i].first));
+        int y = std::max(0, std::min(size[1], drawVertices[i].second));
+        rectanglePoints->SetPoint(i, x, y, 0);
+    }
+    
+    // 创建线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    
+    // 连接所有相邻顶点
+    for (size_t i = 0; i < drawVertices.size() - 1; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, i + 1);
+        lines->InsertNextCell(line);
+    }
+    
+    // 如果不是在绘制状态（即已完成），连接最后一个点到第一个点
+    if (!isDrawingPolygon && drawVertices.size() > 2) {
+        vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
+        closingLine->GetPointIds()->SetId(0, drawVertices.size() - 1);
+        closingLine->GetPointIds()->SetId(1, 0);
+        lines->InsertNextCell(closingLine);
+    }
+    
+    rectanglePolyData->SetLines(lines);
+    rectanglePoints->Modified();
+    rectanglePolyData->Modified();
+    renderer->GetRenderWindow()->Render();
+}
+
+void Selector::ClearSelectionPolygon()
+{
+    if (renderer) {
+        rectangleActor->SetVisibility(0);
+        renderer->GetRenderWindow()->Render();
+    }
+    polygonVertices.clear();
+    isDrawingPolygon = false;
+}
+
+bool Selector::IsPointInPolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon)
+{
+    if (polygon.size() < 3) return false;
+    
+    // 使用射线法判断点是否在多边形内
+    bool inside = false;
+    size_t j = polygon.size() - 1;
+    
+    for (size_t i = 0; i < polygon.size(); ++i) {
+        double xi = polygon[i].first;
+        double yi = polygon[i].second;
+        double xj = polygon[j].first;
+        double yj = polygon[j].second;
+        
+        // 检查射线是否与边相交
+        if (((yi > y) != (yj > y)) && 
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    
+    return inside;
+}

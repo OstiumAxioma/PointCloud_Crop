@@ -197,6 +197,21 @@ void PointCloudViewer::enableCircleSelection(bool enable)
     }
 }
 
+void PointCloudViewer::enablePolygonSelection(bool enable)
+{
+    if (rectangleSelector) {
+        rectangleSelector->SetSelectionShape(SelectionShape::Polygon);
+        rectangleSelector->EnableRectangleSelection(enable);
+        
+        // 设置光标
+        if (enable) {
+            this->setCursor(Qt::CrossCursor);
+        } else {
+            this->setCursor(Qt::ArrowCursor);
+        }
+    }
+}
+
 void PointCloudViewer::clearAllSelectedPoints()
 {
     if (rectangleSelector) {
