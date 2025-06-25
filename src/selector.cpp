@@ -124,6 +124,28 @@ void Selector::ClearAllSelectedPoints()
     qDebug() << "已清除所有选中点";
 }
 
+void Selector::ClearCurrentSelection()
+{
+    // 清除当前选择状态，包括正在绘制的选择框
+    switch (selectionShape) {
+        case SelectionShape::Rectangle:
+            ClearSelectionRectangle();
+            break;
+        case SelectionShape::Circle:
+            ClearSelectionCircle();
+            break;
+        case SelectionShape::Polygon:
+            ClearSelectionPolygon();
+            break;
+    }
+    
+    // 重置选择状态
+    isSelecting = false;
+    isDrawingPolygon = false;
+    
+    qDebug() << "已清除当前选择状态";
+}
+
 void Selector::OnLeftButtonDown()
 {
     if (!rectangleSelectionEnabled) {
@@ -140,8 +162,12 @@ void Selector::OnLeftButtonDown()
             // 开始绘制多边形
             isDrawingPolygon = true;
             polygonVertices.clear();
-            rectangleActor->SetVisibility(1);
+            //等添加第一个顶点后再显示rectangleActor
         }
+        
+        // 更新当前鼠标位置
+        currentX = x;
+        currentY = y;
         
         // 添加顶点
         AddPolygonVertex(x, y);
@@ -209,6 +235,29 @@ void Selector::OnRightButtonDown()
     } else {
         vtkInteractorStyleTrackballCamera::OnRightButtonDown();
     }
+}
+
+void Selector::OnKeyPress()
+{
+    if (!rectangleSelectionEnabled) {
+        vtkInteractorStyleTrackballCamera::OnKeyPress();
+        return;
+    }
+    
+    // 获取按键信息
+    vtkRenderWindowInteractor *rwi = this->Interactor;
+    std::string key = rwi->GetKeySym();
+    
+    if (selectionShape == SelectionShape::Polygon && isDrawingPolygon) {
+        if (key == "BackSpace") {
+            // 撤销最后一个顶点
+            UndoLastVertex();
+            return;
+        }
+    }
+    
+    // 调用父类方法处理其他按键
+    vtkInteractorStyleTrackballCamera::OnKeyPress();
 }
 
 void Selector::OnMouseMove()
@@ -679,8 +728,44 @@ bool Selector::IsPointInSelectionArea(double screenX, double screenY)
 void Selector::AddPolygonVertex(int x, int y)
 {
     polygonVertices.emplace_back(x, y);
-    DrawSelectionPolygon();
+    
+    // 添加第一个顶点时才显示选择框
+    if (polygonVertices.size() == 1) {
+        rectangleActor->SetVisibility(1);
+    }
+    
+    DrawSelectionPolygon(false); // 点击时不添加临时顶点
     qDebug() << "添加多边形顶点:" << x << "," << y << "，当前顶点数:" << polygonVertices.size();
+}
+
+void Selector::UndoLastVertex()
+{
+    if (polygonVertices.empty()) {
+        qDebug() << "没有顶点可以撤销";
+        return;
+    }
+    
+    // 删除最后一个顶点
+    auto lastVertex = polygonVertices.back();
+    polygonVertices.pop_back();
+    
+    qDebug() << "撤销顶点:" << lastVertex.first << "," << lastVertex.second << "，剩余顶点数:" << polygonVertices.size();
+    
+    if (polygonVertices.empty()) {
+        // 如果所有顶点都被删除，取消当前绘制
+        isDrawingPolygon = false;
+        rectangleActor->SetVisibility(0);
+        renderer->GetRenderWindow()->Render();
+        
+        if (cursorCallback) {
+            cursorCallback(Qt::ArrowCursor);
+        }
+        
+        qDebug() << "所有顶点已撤销，取消多边形绘制";
+    } else {
+        // 重新绘制多边形
+        DrawSelectionPolygon(false); // 撤销时不添加临时顶点
+    }
 }
 
 void Selector::CompletePolygonSelection()
@@ -709,7 +794,7 @@ void Selector::CompletePolygonSelection()
     qDebug() << "多边形选择完成";
 }
 
-void Selector::DrawSelectionPolygon()
+void Selector::DrawSelectionPolygon(bool addTemporaryVertex)
 {
     if (!renderer || polygonVertices.empty()) return;
     
@@ -717,14 +802,14 @@ void Selector::DrawSelectionPolygon()
     vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
     int* size = renderWindow->GetSize();
     
-    // 至少需要当前鼠标位置来绘制临时多边形
+    // 基于参数决定是否添加临时顶点
     std::vector<std::pair<int, int>> drawVertices = polygonVertices;
-    if (isDrawingPolygon) {
-        // 添加当前鼠标位置作为临时顶点
+    if (addTemporaryVertex && isDrawingPolygon && polygonVertices.size() >= 1) {
+        // 只有在鼠标移动时才添加当前鼠标位置作为临时顶点
         drawVertices.emplace_back(currentX, currentY);
     }
     
-    if (drawVertices.size() < 2) return;
+    if (drawVertices.size() < 1) return;
     
     // 设置顶点数量
     rectanglePoints->SetNumberOfPoints(drawVertices.size());
@@ -739,20 +824,23 @@ void Selector::DrawSelectionPolygon()
     // 创建线条连接
     vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
     
-    // 连接所有相邻顶点
-    for (size_t i = 0; i < drawVertices.size() - 1; ++i) {
-        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-        line->GetPointIds()->SetId(0, i);
-        line->GetPointIds()->SetId(1, i + 1);
-        lines->InsertNextCell(line);
-    }
-    
-    // 如果不是在绘制状态（即已完成），连接最后一个点到第一个点
-    if (!isDrawingPolygon && drawVertices.size() > 2) {
-        vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
-        closingLine->GetPointIds()->SetId(0, drawVertices.size() - 1);
-        closingLine->GetPointIds()->SetId(1, 0);
-        lines->InsertNextCell(closingLine);
+    // 只有在至少有两个顶点时才绘制线条
+    if (drawVertices.size() >= 2) {
+        // 连接所有相邻顶点
+        for (size_t i = 0; i < drawVertices.size() - 1; ++i) {
+            vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+            line->GetPointIds()->SetId(0, i);
+            line->GetPointIds()->SetId(1, i + 1);
+            lines->InsertNextCell(line);
+        }
+        
+        // 如果不是在绘制状态（即已完成），连接最后一个点到第一个点
+        if (!isDrawingPolygon && drawVertices.size() > 2) {
+            vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
+            closingLine->GetPointIds()->SetId(0, drawVertices.size() - 1);
+            closingLine->GetPointIds()->SetId(1, 0);
+            lines->InsertNextCell(closingLine);
+        }
     }
     
     rectanglePolyData->SetLines(lines);

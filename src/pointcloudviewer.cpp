@@ -170,6 +170,11 @@ void PointCloudViewer::clearDisplay()
 void PointCloudViewer::enableRectangleSelection(bool enable)
 {
     if (rectangleSelector) {
+        if (!enable) {
+            // 关闭矩形选择时，先清理当前绘制的选择框
+            rectangleSelector->ClearCurrentSelection();
+        }
+        
         rectangleSelector->SetSelectionShape(SelectionShape::Rectangle);
         rectangleSelector->EnableRectangleSelection(enable);
         
@@ -185,6 +190,11 @@ void PointCloudViewer::enableRectangleSelection(bool enable)
 void PointCloudViewer::enableCircleSelection(bool enable)
 {
     if (rectangleSelector) {
+        if (!enable) {
+            // 关闭圆形选择时，先清理当前绘制的选择框
+            rectangleSelector->ClearCurrentSelection();
+        }
+        
         rectangleSelector->SetSelectionShape(SelectionShape::Circle);
         rectangleSelector->EnableRectangleSelection(enable);
         
@@ -200,6 +210,11 @@ void PointCloudViewer::enableCircleSelection(bool enable)
 void PointCloudViewer::enablePolygonSelection(bool enable)
 {
     if (rectangleSelector) {
+        if (!enable) {
+            // 关闭多边形选择时，先清理当前绘制的多边形
+            rectangleSelector->ClearCurrentSelection();
+        }
+        
         rectangleSelector->SetSelectionShape(SelectionShape::Polygon);
         rectangleSelector->EnableRectangleSelection(enable);
         

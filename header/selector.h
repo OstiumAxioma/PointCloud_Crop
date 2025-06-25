@@ -60,6 +60,9 @@ public:
     // 清除所有选中的点
     void ClearAllSelectedPoints();
     
+    // 清除当前选择状态（包括正在绘制的选择框）
+    void ClearCurrentSelection();
+    
     // 获取当前选中的点数量
     size_t GetSelectedPointCount() const { return selectedPointIds.size(); }
     
@@ -77,6 +80,9 @@ protected:
     virtual void OnLeftButtonUp() override;
     virtual void OnRightButtonDown() override;
     virtual void OnMouseMove() override;
+    
+    // 键盘事件处理
+    virtual void OnKeyPress() override;
 
 private:
     // 绘制选择矩形
@@ -88,9 +94,10 @@ private:
     void ClearSelectionCircle();
     
     // 绘制选择多边形
-    void DrawSelectionPolygon();
+    void DrawSelectionPolygon(bool addTemporaryVertex = true);
     void ClearSelectionPolygon();
     void AddPolygonVertex(int x, int y);
+    void UndoLastVertex();
     void CompletePolygonSelection();
     bool IsPointInPolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon);
     
