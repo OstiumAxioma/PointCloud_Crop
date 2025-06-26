@@ -1127,8 +1127,9 @@ void Selector::DrawPolygon(const std::vector<std::pair<double, double>>& vertice
             lines->InsertNextCell(line);
         }
         
-        // 如果不是在绘制状态（即已完成），连接最后一个点到第一个点
-        if (!isDrawingPolygon && vertices.size() > 2) {
+        // 连接最后一个点到第一个点形成闭合图形
+        // 如果正在绘制且顶点数>=3，或者已完成且顶点数>2，都显示闭合线
+        if ((isDrawingPolygon && vertices.size() >= 3) || (!isDrawingPolygon && vertices.size() > 2)) {
             vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
             closingLine->GetPointIds()->SetId(0, vertices.size() - 1);
             closingLine->GetPointIds()->SetId(1, 0);
