@@ -19,6 +19,7 @@
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -253,6 +254,9 @@ void Selector::OnLeftButtonUp()
     
     canvasShapes.push_back(newShape);
     qDebug() << "形状已添加到画布，当前画布形状数：" << canvasShapes.size();
+    
+    // 执行图形融合
+    PerformShapeUnion();
     
     // 隐藏当前形状显示，显示画布
     currentShapeActor->SetVisibility(0);
@@ -532,6 +536,9 @@ void Selector::CompleteCurrentPolygon()
     
     canvasShapes.push_back(newShape);
     qDebug() << "多边形已添加到画布，当前画布形状数：" << canvasShapes.size();
+    
+    // 执行图形融合
+    PerformShapeUnion();
     
     // 隐藏当前形状显示，显示画布
     currentShapeActor->SetVisibility(0);
@@ -1074,4 +1081,383 @@ bool Selector::IsPointInCanvasShapes(double screenX, double screenY)
         }
     }
     return false;
+}
+
+void Selector::PerformShapeUnion()
+{
+    if (canvasShapes.size() <= 1) {
+        return; // 如果只有一个或没有图形，无需合并
+    }
+    
+    qDebug() << "开始执行图形融合，当前图形数：" << canvasShapes.size();
+    
+    // 将所有图形转换为多边形
+    std::vector<std::vector<std::pair<double, double>>> polygons;
+    for (const auto& shape : canvasShapes) {
+        std::vector<std::pair<double, double>> polygon = ConvertShapeToPolygon(shape);
+        if (!polygon.empty()) {
+            polygons.push_back(polygon);
+        }
+    }
+    
+    if (polygons.empty()) {
+        return;
+    }
+    
+    // 执行多边形并集运算
+    std::vector<std::pair<double, double>> unionResult = UnionPolygons(polygons);
+    
+    if (unionResult.size() >= 3) {
+        // 用合并后的结果替换原有图形
+        canvasShapes.clear();
+        
+        Shape mergedShape(SelectionShape::Polygon);
+        mergedShape.polygon.vertices = unionResult;
+        canvasShapes.push_back(mergedShape);
+        
+        qDebug() << "图形融合完成，合并后的多边形顶点数：" << unionResult.size();
+    } else {
+        qDebug() << "图形融合失败，保持原有图形";
+    }
+}
+
+std::vector<std::pair<double, double>> Selector::ConvertShapeToPolygon(const Shape& shape, int subdivisions)
+{
+    std::vector<std::pair<double, double>> polygon;
+    
+    switch (shape.type) {
+        case SelectionShape::Rectangle: {
+            double x1 = std::min(shape.rect.x1, shape.rect.x2);
+            double x2 = std::max(shape.rect.x1, shape.rect.x2);
+            double y1 = std::min(shape.rect.y1, shape.rect.y2);
+            double y2 = std::max(shape.rect.y1, shape.rect.y2);
+            
+            polygon.emplace_back(x1, y1);
+            polygon.emplace_back(x2, y1);
+            polygon.emplace_back(x2, y2);
+            polygon.emplace_back(x1, y2);
+            break;
+        }
+        case SelectionShape::Circle: {
+            for (int i = 0; i < subdivisions; ++i) {
+                double angle = 2.0 * M_PI * i / subdivisions;
+                double x = shape.circle.centerX + shape.circle.radius * cos(angle);
+                double y = shape.circle.centerY + shape.circle.radius * sin(angle);
+                polygon.emplace_back(x, y);
+            }
+            break;
+        }
+        case SelectionShape::Polygon: {
+            polygon = shape.polygon.vertices;
+            break;
+        }
+    }
+    
+    return polygon;
+}
+
+std::vector<std::pair<double, double>> Selector::UnionPolygons(const std::vector<std::vector<std::pair<double, double>>>& polygons)
+{
+    if (polygons.empty()) {
+        return {};
+    }
+    
+    if (polygons.size() == 1) {
+        return polygons[0];
+    }
+    
+    // 使用网格化方法进行并集运算
+    return MergePolygonsByGrid(polygons);
+}
+
+std::vector<std::pair<double, double>> Selector::MergePolygonsByGrid(const std::vector<std::vector<std::pair<double, double>>>& polygons)
+{
+    if (polygons.empty()) {
+        return {};
+    }
+    
+    // 计算边界框
+    double minX = std::numeric_limits<double>::max();
+    double maxX = std::numeric_limits<double>::min();
+    double minY = std::numeric_limits<double>::max();
+    double maxY = std::numeric_limits<double>::min();
+    
+    for (const auto& polygon : polygons) {
+        for (const auto& point : polygon) {
+            minX = std::min(minX, point.first);
+            maxX = std::max(maxX, point.first);
+            minY = std::min(minY, point.second);
+            maxY = std::max(maxY, point.second);
+        }
+    }
+    
+    // 扩展边界框一点
+    double margin = 10.0;
+    minX -= margin;
+    maxX += margin;
+    minY -= margin;
+    maxY += margin;
+    
+    // 创建网格
+    int gridResolution = 200; // 网格分辨率，可以调整
+    double stepX = (maxX - minX) / gridResolution;
+    double stepY = (maxY - minY) / gridResolution;
+    
+    // 创建网格并标记内部点
+    std::vector<std::vector<bool>> grid(gridResolution, std::vector<bool>(gridResolution, false));
+    
+    for (int i = 0; i < gridResolution; ++i) {
+        for (int j = 0; j < gridResolution; ++j) {
+            double x = minX + i * stepX;
+            double y = minY + j * stepY;
+            
+            if (IsPointInsideAnyPolygon(x, y, polygons)) {
+                grid[i][j] = true;
+            }
+        }
+    }
+    
+    // 追踪边界
+    return TraceBoundary(grid, gridResolution, gridResolution, minX, minY, stepX, stepY);
+}
+
+bool Selector::IsPointInsideAnyPolygon(double x, double y, const std::vector<std::vector<std::pair<double, double>>>& polygons)
+{
+    for (const auto& polygon : polygons) {
+        if (IsPointInPolygon(x, y, polygon)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::pair<double, double>> Selector::TraceBoundary(const std::vector<std::vector<bool>>& grid, 
+                                                               int gridWidth, int gridHeight, 
+                                                               double minX, double minY, 
+                                                               double stepX, double stepY)
+{
+    std::vector<std::pair<double, double>> boundary;
+    
+    // 找到最左下角的边界点作为起始点
+    int startI = -1, startJ = -1;
+    for (int j = 0; j < gridHeight; ++j) {
+        for (int i = 0; i < gridWidth; ++i) {
+            if (grid[i][j]) {
+                // 检查是否是边界点（至少有一个相邻点是外部点）
+                bool isBoundary = false;
+                for (int di = -1; di <= 1; ++di) {
+                    for (int dj = -1; dj <= 1; ++dj) {
+                        int ni = i + di;
+                        int nj = j + dj;
+                        if (ni < 0 || ni >= gridWidth || nj < 0 || nj >= gridHeight || !grid[ni][nj]) {
+                            isBoundary = true;
+                            break;
+                        }
+                    }
+                    if (isBoundary) break;
+                }
+                
+                if (isBoundary) {
+                    startI = i;
+                    startJ = j;
+                    goto found_start;
+                }
+            }
+        }
+    }
+    
+    found_start:
+    if (startI == -1) {
+        return boundary; // 没有找到边界点
+    }
+    
+    // 使用改进的边界追踪算法 (Moore Neighborhood Tracing)
+    std::vector<std::vector<bool>> visited(gridWidth, std::vector<bool>(gridHeight, false));
+    
+    // 8个方向：右、右下、下、左下、左、左上、上、右上
+    int dx[] = {1, 1, 0, -1, -1, -1, 0, 1};
+    int dy[] = {0, -1, -1, -1, 0, 1, 1, 1};
+    
+    int currentI = startI;
+    int currentJ = startJ;
+    int prevDirection = 6; // 从上方来的（因为我们要顺时针追踪）
+    
+    do {
+        // 添加当前点到边界
+        double x = minX + currentI * stepX;
+        double y = minY + currentJ * stepY;
+        boundary.emplace_back(x, y);
+        visited[currentI][currentJ] = true;
+        
+        // 寻找下一个边界点
+        bool foundNext = false;
+        int nextI = currentI, nextJ = currentJ;
+        
+        // 从上一个方向的左侧开始搜索（确保顺时针追踪）
+        int startDir = (prevDirection + 6) % 8; // 左转90度开始
+        
+        for (int dirOffset = 0; dirOffset < 8; ++dirOffset) {
+            int dir = (startDir + dirOffset) % 8;
+            int ni = currentI + dx[dir];
+            int nj = currentJ + dy[dir];
+            
+            // 检查是否在网格范围内且是内部点
+            if (ni >= 0 && ni < gridWidth && nj >= 0 && nj < gridHeight && grid[ni][nj]) {
+                // 检查是否是边界点
+                bool isBoundary = false;
+                for (int di = -1; di <= 1; ++di) {
+                    for (int dj = -1; dj <= 1; ++dj) {
+                        int nni = ni + di;
+                        int nnj = nj + dj;
+                        if (nni < 0 || nni >= gridWidth || nnj < 0 || nnj >= gridHeight || !grid[nni][nnj]) {
+                            isBoundary = true;
+                            break;
+                        }
+                    }
+                    if (isBoundary) break;
+                }
+                
+                if (isBoundary) {
+                    nextI = ni;
+                    nextJ = nj;
+                    prevDirection = dir;
+                    foundNext = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!foundNext) {
+            break; // 没有找到下一个边界点
+        }
+        
+        // 移动到下一个点
+        currentI = nextI;
+        currentJ = nextJ;
+        
+        // 检查是否回到起始点
+        if (currentI == startI && currentJ == startJ && boundary.size() > 2) {
+            break;
+        }
+        
+        // 防止无限循环
+        if (boundary.size() > gridWidth * gridHeight) {
+            break;
+        }
+        
+    } while (true);
+    
+    // 如果边界点太少，回退到简化版本
+    if (boundary.size() < 3) {
+        boundary.clear();
+        
+        // 收集所有边界点
+        std::vector<std::pair<double, double>> allBoundaryPoints;
+        for (int i = 0; i < gridWidth; ++i) {
+            for (int j = 0; j < gridHeight; ++j) {
+                if (grid[i][j]) {
+                    // 检查是否是边界点
+                    bool isBoundary = false;
+                    for (int di = -1; di <= 1; ++di) {
+                        for (int dj = -1; dj <= 1; ++dj) {
+                            int ni = i + di;
+                            int nj = j + dj;
+                            if (ni < 0 || ni >= gridWidth || nj < 0 || nj >= gridHeight || !grid[ni][nj]) {
+                                isBoundary = true;
+                                break;
+                            }
+                        }
+                        if (isBoundary) break;
+                    }
+                    
+                    if (isBoundary) {
+                        double x = minX + i * stepX;
+                        double y = minY + j * stepY;
+                        allBoundaryPoints.emplace_back(x, y);
+                    }
+                }
+            }
+        }
+        
+        // 对边界点进行排序以形成轮廓
+        if (allBoundaryPoints.size() >= 3) {
+            boundary = SortBoundaryPoints(allBoundaryPoints);
+        }
+    }
+    
+    return boundary;
+}
+
+std::vector<std::pair<double, double>> Selector::SortBoundaryPoints(const std::vector<std::pair<double, double>>& points)
+{
+    if (points.size() < 3) {
+        return points;
+    }
+    
+    // 找到重心
+    double centerX = 0, centerY = 0;
+    for (const auto& point : points) {
+        centerX += point.first;
+        centerY += point.second;
+    }
+    centerX /= points.size();
+    centerY /= points.size();
+    
+    // 根据相对于重心的角度排序
+    std::vector<std::pair<double, double>> sortedPoints = points;
+    std::sort(sortedPoints.begin(), sortedPoints.end(), 
+              [centerX, centerY](const std::pair<double, double>& a, const std::pair<double, double>& b) {
+                  double angleA = atan2(a.second - centerY, a.first - centerX);
+                  double angleB = atan2(b.second - centerY, b.first - centerX);
+                  return angleA < angleB;
+              });
+    
+    return sortedPoints;
+}
+
+std::vector<std::pair<double, double>> Selector::ComputeConvexHull(const std::vector<std::pair<double, double>>& points)
+{
+    std::vector<std::pair<double, double>> hull;
+    
+    if (points.size() < 3) {
+        return points;
+    }
+    
+    // 使用Andrew算法计算凸包
+    std::vector<std::pair<double, double>> sortedPoints = points;
+    std::sort(sortedPoints.begin(), sortedPoints.end());
+    
+    // 构建下凸包
+    for (const auto& point : sortedPoints) {
+        while (hull.size() >= 2 && 
+               CrossProduct(hull[hull.size()-2], hull[hull.size()-1], point) <= 0) {
+            hull.pop_back();
+        }
+        hull.push_back(point);
+    }
+    
+    // 构建上凸包
+    size_t lowerSize = hull.size();
+    for (int i = static_cast<int>(sortedPoints.size()) - 2; i >= 0; --i) {
+        const auto& point = sortedPoints[i];
+        while (hull.size() > lowerSize && 
+               CrossProduct(hull[hull.size()-2], hull[hull.size()-1], point) <= 0) {
+            hull.pop_back();
+        }
+        hull.push_back(point);
+    }
+    
+    // 移除最后一个重复点
+    if (hull.size() > 1) {
+        hull.pop_back();
+    }
+    
+    return hull;
+}
+
+double Selector::CrossProduct(const std::pair<double, double>& O, 
+                              const std::pair<double, double>& A, 
+                              const std::pair<double, double>& B)
+{
+    return (A.first - O.first) * (B.second - O.second) - (A.second - O.second) * (B.first - O.first);
 }
