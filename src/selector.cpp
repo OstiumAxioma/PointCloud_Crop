@@ -188,6 +188,24 @@ Shape VectorRectangle::toShape() const {
     return shape;
 }
 
+std::string VectorRectangle::serialize() const {
+    return std::to_string(x1_) + "," + std::to_string(y1_) + "," + 
+           std::to_string(x2_) + "," + std::to_string(y2_);
+}
+
+void VectorRectangle::deserialize(const std::string& data) {
+    size_t pos1 = data.find(',');
+    size_t pos2 = data.find(',', pos1 + 1);
+    size_t pos3 = data.find(',', pos2 + 1);
+    
+    x1_ = std::stod(data.substr(0, pos1));
+    y1_ = std::stod(data.substr(pos1 + 1, pos2 - pos1 - 1));
+    x2_ = std::stod(data.substr(pos2 + 1, pos3 - pos2 - 1));
+    y2_ = std::stod(data.substr(pos3 + 1));
+    
+    normalizeCoordinates();
+}
+
 //=============================================================================
 // VectorCircle 实现
 //=============================================================================
@@ -291,6 +309,20 @@ Shape VectorCircle::toShape() const {
     shape.circle.centerY = centerY_;
     shape.circle.radius = radius_;
     return shape;
+}
+
+std::string VectorCircle::serialize() const {
+    return std::to_string(centerX_) + "," + std::to_string(centerY_) + "," + 
+           std::to_string(radius_);
+}
+
+void VectorCircle::deserialize(const std::string& data) {
+    size_t pos1 = data.find(',');
+    size_t pos2 = data.find(',', pos1 + 1);
+    
+    centerX_ = std::stod(data.substr(0, pos1));
+    centerY_ = std::stod(data.substr(pos1 + 1, pos2 - pos1 - 1));
+    radius_ = std::stod(data.substr(pos2 + 1));
 }
 
 //=============================================================================
@@ -455,6 +487,38 @@ Shape VectorPolygon::toShape() const {
     return shape;
 }
 
+std::string VectorPolygon::serialize() const {
+    std::string result;
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        if (i > 0) result += ";";
+        result += std::to_string(vertices_[i].first) + "," + std::to_string(vertices_[i].second);
+    }
+    return result;
+}
+
+void VectorPolygon::deserialize(const std::string& data) {
+    vertices_.clear();
+    if (data.empty()) return;
+    
+    size_t start = 0;
+    size_t end = data.find(';');
+    
+    while (true) {
+        std::string vertex = (end == std::string::npos) ? data.substr(start) : data.substr(start, end - start);
+        
+        size_t commaPos = vertex.find(',');
+        if (commaPos != std::string::npos) {
+            double x = std::stod(vertex.substr(0, commaPos));
+            double y = std::stod(vertex.substr(commaPos + 1));
+            vertices_.emplace_back(x, y);
+        }
+        
+        if (end == std::string::npos) break;
+        start = end + 1;
+        end = data.find(';', start);
+    }
+}
+
 //=============================================================================
 // Selector 实现
 //=============================================================================
@@ -476,6 +540,7 @@ Selector::Selector()
     , isDragging(false)
     , lastMouseX(0)
     , lastMouseY(0)
+    , shapeStateBeforeDrag("")
 {
     // 矢量图形显示容器初始化（每个图形将有独立的actor）
     
@@ -551,6 +616,11 @@ void Selector::ClearCanvas()
     vectorShapeMappers.clear();
     vectorShapePolyDatas.clear();
     vectorShapePointsList.clear();
+    
+    // 清空命令历史
+    while (!commandHistory.empty()) {
+        commandHistory.pop();
+    }
     
     DeselectAllShapes();
     controlActor->SetVisibility(0);
@@ -761,6 +831,9 @@ void Selector::OnLeftButtonDown()
                 lastMouseX = x;
                 lastMouseY = y;
                 
+                // 记录编辑前的状态
+                shapeStateBeforeDrag = selectedShape->serialize();
+                
                 if (cursorCallback) {
                     cursorCallback(Qt::PointingHandCursor);
                 }
@@ -780,6 +853,9 @@ void Selector::OnLeftButtonDown()
             isDragging = true;
             lastMouseX = x;
             lastMouseY = y;
+            
+            // 记录拖拽前的状态
+            shapeStateBeforeDrag = selectedShape->serialize();
             selectedShape->startDrag(x, y);
             
             if (cursorCallback) {
@@ -836,12 +912,45 @@ void Selector::OnLeftButtonUp()
         if (isDragging) {
             if (selectedShape) {
                 selectedShape->endDrag();
+                
+                // 记录拖拽后的状态并创建命令
+                std::string stateAfterDrag = selectedShape->serialize();
+                if (stateAfterDrag != shapeStateBeforeDrag) {
+                    std::unique_ptr<Command> command;
+                    
+                    if (currentOperation == EditOperation::Move) {
+                        // 暂时使用EditShapeCommand，因为移动也会改变状态
+                        command = std::make_unique<EditShapeCommand>(selectedShape, shapeStateBeforeDrag, stateAfterDrag);
+                    } else if (currentOperation == EditOperation::EditVertex) {
+                        command = std::make_unique<EditShapeCommand>(selectedShape, shapeStateBeforeDrag, stateAfterDrag);
+                    }
+                    
+                    if (command) {
+                        // 不调用ExecuteCommand，因为操作已经执行了，只需要记录
+                        commandHistory.push(std::move(command));
+                        
+                        // 限制历史记录大小
+                        if (commandHistory.size() > MAX_HISTORY_SIZE) {
+                            std::stack<std::unique_ptr<Command>> newHistory;
+                            size_t keepCount = std::min(commandHistory.size(), MAX_HISTORY_SIZE);
+                            for (size_t i = 0; i < keepCount; ++i) {
+                                if (!commandHistory.empty()) {
+                                    newHistory.push(std::move(commandHistory.top()));
+                                    commandHistory.pop();
+                                }
+                            }
+                            commandHistory = std::move(newHistory);
+                        }
+                    }
+                }
+                
                 UpdateVectorShapeDisplay();
             }
             
             isDragging = false;
             currentOperation = EditOperation::None;
             selectedControlPoint = -1;
+            shapeStateBeforeDrag.clear();
             
             if (cursorCallback) {
                 if (selectedShape) {
@@ -870,21 +979,27 @@ void Selector::OnLeftButtonUp()
     
     isDrawing = false;
     
-    // 将当前形状添加到矢量图形列表
+    // 将当前形状添加到矢量图形列表（使用命令模式）
+    std::unique_ptr<VectorShape> newShape;
     switch (currentDrawingShape) {
         case SelectionShape::Rectangle: {
-            vectorShapes.push_back(std::make_unique<VectorRectangle>(startX, startY, currentX, currentY));
+            newShape = std::make_unique<VectorRectangle>(startX, startY, currentX, currentY);
             break;
         }
         case SelectionShape::Circle: {
             double centerX = (startX + currentX) / 2.0;
             double centerY = (startY + currentY) / 2.0;
             double radius = sqrt(pow(currentX - startX, 2) + pow(currentY - startY, 2)) / 2.0;
-            vectorShapes.push_back(std::make_unique<VectorCircle>(centerX, centerY, radius));
+            newShape = std::make_unique<VectorCircle>(centerX, centerY, radius);
             break;
         }
         default:
             break;
+    }
+    
+    if (newShape) {
+        auto addCommand = std::make_unique<AddShapeCommand>(this, std::move(newShape));
+        ExecuteCommand(std::move(addCommand));
     }
     
     qDebug() << "形状已添加到画布，当前画布形状数：" << vectorShapes.size();
@@ -918,15 +1033,27 @@ void Selector::OnRightButtonDown()
 
 void Selector::OnKeyPress()
 {
+    vtkRenderWindowInteractor *rwi = this->Interactor;
+    std::string key = rwi->GetKeySym();
+    bool ctrlPressed = (rwi->GetControlKey() != 0);
+    
+    // 全局快捷键
+    if (ctrlPressed && key == "z") {
+        Undo();
+        return;
+    }
+    
+    if (key == "Delete") {
+        DeleteSelectedShape();
+        return;
+    }
+    
     if (!drawingModeEnabled) {
         if (!viewLocked) {
             vtkInteractorStyleTrackballCamera::OnKeyPress();
         }
         return;
     }
-    
-    vtkRenderWindowInteractor *rwi = this->Interactor;
-    std::string key = rwi->GetKeySym();
     
     if (currentDrawingShape == SelectionShape::Polygon && isDrawingPolygon) {
         if (key == "BackSpace") {
@@ -1174,6 +1301,249 @@ void Selector::UndoLastVertex()
     }
 }
 
+//=============================================================================
+// 撤销系统实现
+//=============================================================================
+
+void Selector::ExecuteCommand(std::unique_ptr<Command> command)
+{
+    command->execute();
+    
+    // 添加到历史记录
+    commandHistory.push(std::move(command));
+    
+    // 限制历史记录大小
+    if (commandHistory.size() > MAX_HISTORY_SIZE) {
+        std::stack<std::unique_ptr<Command>> newHistory;
+        for (size_t i = 0; i < MAX_HISTORY_SIZE; ++i) {
+            if (!commandHistory.empty()) {
+                newHistory.push(std::move(commandHistory.top()));
+                commandHistory.pop();
+            }
+        }
+        commandHistory = std::move(newHistory);
+    }
+    
+    UpdateVectorShapeDisplay();
+}
+
+void Selector::Undo()
+{
+    if (commandHistory.empty()) {
+        qDebug() << "没有可撤销的操作";
+        return;
+    }
+    
+    auto command = std::move(commandHistory.top());
+    commandHistory.pop();
+    
+    command->undo();
+    qDebug() << "已撤销操作：" << QString::fromStdString(command->getDescription());
+    
+    // 如果撤销后没有选中的图形，清除选择状态
+    if (selectedShape && GetShapeIndex(selectedShape) == SIZE_MAX) {
+        DeselectAllShapes();
+    } else {
+        // 强制更新显示
+        UpdateVectorShapeDisplay();
+    }
+}
+
+void Selector::DeleteSelectedShape()
+{
+    if (!selectedShape) {
+        qDebug() << "没有选中的图形可删除";
+        return;
+    }
+    
+    auto deleteCommand = std::make_unique<DeleteShapeCommand>(this, selectedShape);
+    ExecuteCommand(std::move(deleteCommand));
+    
+    DeselectAllShapes();
+    qDebug() << "已删除选中的图形";
+}
+
+void Selector::AddShapeInternal(std::unique_ptr<VectorShape> shape)
+{
+    vectorShapes.push_back(std::move(shape));
+}
+
+std::unique_ptr<VectorShape> Selector::RemoveShapeInternal(VectorShape* shape)
+{
+    for (auto it = vectorShapes.begin(); it != vectorShapes.end(); ++it) {
+        if (it->get() == shape) {
+            if (selectedShape == shape) {
+                selectedShape = nullptr;
+            }
+            auto removedShape = std::move(*it);
+            vectorShapes.erase(it);
+            return removedShape;
+        }
+    }
+    return nullptr;
+}
+
+void Selector::InsertShapeInternal(std::unique_ptr<VectorShape> shape, size_t index)
+{
+    if (index >= vectorShapes.size()) {
+        vectorShapes.push_back(std::move(shape));
+    } else {
+        vectorShapes.insert(vectorShapes.begin() + index, std::move(shape));
+    }
+}
+
+size_t Selector::GetShapeIndex(VectorShape* shape) const
+{
+    for (size_t i = 0; i < vectorShapes.size(); ++i) {
+        if (vectorShapes[i].get() == shape) {
+            return i;
+        }
+    }
+    return SIZE_MAX; // 表示未找到
+}
+
+//=============================================================================
+// 命令类实现
+//=============================================================================
+
+// AddShapeCommand 实现
+AddShapeCommand::AddShapeCommand(Selector* selector, std::unique_ptr<VectorShape> shape)
+    : selector_(selector), shape_(std::move(shape)), executed_(false) {
+    shapePtr_ = shape_.get(); // 保存原始指针
+}
+
+void AddShapeCommand::execute() {
+    if (!executed_) {
+        selector_->AddShapeInternal(std::move(shape_));
+        executed_ = true;
+    }
+}
+
+void AddShapeCommand::undo() {
+    if (executed_) {
+        // 使用保存的指针来查找和移除图形，重新获得所有权
+        shape_ = selector_->RemoveShapeInternal(shapePtr_);
+        executed_ = false;
+    }
+}
+
+std::string AddShapeCommand::getDescription() const {
+    return "添加图形";
+}
+
+// DeleteShapeCommand 实现
+DeleteShapeCommand::DeleteShapeCommand(Selector* selector, VectorShape* shape)
+    : selector_(selector), executed_(false) {
+    originalIndex_ = selector_->GetShapeIndex(shape);
+    
+    // 创建形状的副本
+    switch (shape->getType()) {
+        case SelectionShape::Rectangle: {
+            auto* rect = static_cast<VectorRectangle*>(shape);
+            auto rectShape = rect->toShape();
+            shape_ = std::make_unique<VectorRectangle>(rectShape.rect.x1, rectShape.rect.y1, 
+                                                      rectShape.rect.x2, rectShape.rect.y2);
+            break;
+        }
+        case SelectionShape::Circle: {
+            auto* circle = static_cast<VectorCircle*>(shape);
+            auto circleShape = circle->toShape();
+            shape_ = std::make_unique<VectorCircle>(circleShape.circle.centerX, circleShape.circle.centerY, 
+                                                   circleShape.circle.radius);
+            break;
+        }
+        case SelectionShape::Polygon: {
+            auto* polygon = static_cast<VectorPolygon*>(shape);
+            auto polygonShape = polygon->toShape();
+            shape_ = std::make_unique<VectorPolygon>(polygonShape.polygon.vertices);
+            break;
+        }
+    }
+}
+
+void DeleteShapeCommand::execute() {
+    if (!executed_) {
+        // 移除图形但不需要保存返回值，因为我们已经有副本了
+        selector_->RemoveShapeInternal(shape_.get());
+        executed_ = true;
+    }
+}
+
+void DeleteShapeCommand::undo() {
+    if (executed_) {
+        auto shapeCopy = std::unique_ptr<VectorShape>();
+        
+        // 重新创建形状
+        switch (shape_->getType()) {
+            case SelectionShape::Rectangle: {
+                auto* rect = static_cast<VectorRectangle*>(shape_.get());
+                auto rectShape = rect->toShape();
+                shapeCopy = std::make_unique<VectorRectangle>(rectShape.rect.x1, rectShape.rect.y1, 
+                                                             rectShape.rect.x2, rectShape.rect.y2);
+                break;
+            }
+            case SelectionShape::Circle: {
+                auto* circle = static_cast<VectorCircle*>(shape_.get());
+                auto circleShape = circle->toShape();
+                shapeCopy = std::make_unique<VectorCircle>(circleShape.circle.centerX, circleShape.circle.centerY, 
+                                                          circleShape.circle.radius);
+                break;
+            }
+            case SelectionShape::Polygon: {
+                auto* polygon = static_cast<VectorPolygon*>(shape_.get());
+                auto polygonShape = polygon->toShape();
+                shapeCopy = std::make_unique<VectorPolygon>(polygonShape.polygon.vertices);
+                break;
+            }
+        }
+        
+        selector_->InsertShapeInternal(std::move(shapeCopy), originalIndex_);
+        executed_ = false;
+    }
+}
+
+std::string DeleteShapeCommand::getDescription() const {
+    return "删除图形";
+}
+
+// MoveShapeCommand 实现
+MoveShapeCommand::MoveShapeCommand(VectorShape* shape, double fromX, double fromY, double toX, double toY)
+    : shape_(shape), fromX_(fromX), fromY_(fromY), toX_(toX), toY_(toY) {
+}
+
+void MoveShapeCommand::execute() {
+    shape_->startDrag(fromX_, fromY_);
+    shape_->updateDrag(toX_, toY_);
+    shape_->endDrag();
+}
+
+void MoveShapeCommand::undo() {
+    shape_->startDrag(toX_, toY_);
+    shape_->updateDrag(fromX_, fromY_);
+    shape_->endDrag();
+}
+
+std::string MoveShapeCommand::getDescription() const {
+    return "移动图形";
+}
+
+// EditShapeCommand 实现
+EditShapeCommand::EditShapeCommand(VectorShape* shape, const std::string& beforeState, const std::string& afterState)
+    : shape_(shape), beforeState_(beforeState), afterState_(afterState) {
+}
+
+void EditShapeCommand::execute() {
+    shape_->deserialize(afterState_);
+}
+
+void EditShapeCommand::undo() {
+    shape_->deserialize(beforeState_);
+}
+
+std::string EditShapeCommand::getDescription() const {
+    return "编辑图形";
+}
+
 void Selector::CompleteCurrentPolygon()
 {
     if (currentPolygonVertices.size() < 3) {
@@ -1183,12 +1553,15 @@ void Selector::CompleteCurrentPolygon()
     
     isDrawingPolygon = false;
     
-    // 将多边形添加到矢量图形列表
+    // 将多边形添加到矢量图形列表（使用命令模式）
     std::vector<std::pair<double, double>> vertices;
     for (const auto& vertex : currentPolygonVertices) {
         vertices.emplace_back(vertex.first, vertex.second);
     }
-    vectorShapes.push_back(std::make_unique<VectorPolygon>(vertices));
+    
+    auto newShape = std::make_unique<VectorPolygon>(vertices);
+    auto addCommand = std::make_unique<AddShapeCommand>(this, std::move(newShape));
+    ExecuteCommand(std::move(addCommand));
     
     qDebug() << "多边形已添加到画布，当前画布形状数：" << vectorShapes.size();
     

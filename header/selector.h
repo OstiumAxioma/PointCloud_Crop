@@ -28,6 +28,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <stack>
 
 // 选择框形状枚举
 enum class SelectionShape {
@@ -42,6 +43,76 @@ enum class EditOperation {
     Move,
     Resize,
     EditVertex
+};
+
+// 前向声明
+class VectorShape;
+class Selector;
+
+// 命令基类
+class Command {
+public:
+    virtual ~Command() = default;
+    virtual void execute() = 0;
+    virtual void undo() = 0;
+    virtual std::string getDescription() const = 0;
+};
+
+// 添加图形命令
+class AddShapeCommand : public Command {
+public:
+    AddShapeCommand(Selector* selector, std::unique_ptr<VectorShape> shape);
+    void execute() override;
+    void undo() override;
+    std::string getDescription() const override;
+
+private:
+    Selector* selector_;
+    std::unique_ptr<VectorShape> shape_;
+    VectorShape* shapePtr_; // 保存原始指针，用于undo时查找
+    bool executed_;
+};
+
+// 删除图形命令
+class DeleteShapeCommand : public Command {
+public:
+    DeleteShapeCommand(Selector* selector, VectorShape* shape);
+    void execute() override;
+    void undo() override;
+    std::string getDescription() const override;
+
+private:
+    Selector* selector_;
+    std::unique_ptr<VectorShape> shape_;
+    size_t originalIndex_;
+    bool executed_;
+};
+
+// 移动图形命令
+class MoveShapeCommand : public Command {
+public:
+    MoveShapeCommand(VectorShape* shape, double fromX, double fromY, double toX, double toY);
+    void execute() override;
+    void undo() override;
+    std::string getDescription() const override;
+
+private:
+    VectorShape* shape_;
+    double fromX_, fromY_, toX_, toY_;
+};
+
+// 编辑图形命令（包括顶点移动、缩放等）
+class EditShapeCommand : public Command {
+public:
+    EditShapeCommand(VectorShape* shape, const std::string& beforeState, const std::string& afterState);
+    void execute() override;
+    void undo() override;
+    std::string getDescription() const override;
+
+private:
+    VectorShape* shape_;
+    std::string beforeState_;
+    std::string afterState_;
 };
 
 // 形状数据结构（保持原有结构用于最终选取）
@@ -154,6 +225,10 @@ public:
     // 获取形状类型
     virtual SelectionShape getType() const = 0;
     
+    // 序列化状态（用于撤销功能）
+    virtual std::string serialize() const = 0;
+    virtual void deserialize(const std::string& data) = 0;
+    
 protected:
     bool isSelected_ = false;
 };
@@ -172,6 +247,9 @@ public:
     void moveControlPoint(int index, double x, double y) override;
     Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Rectangle; }
+    
+    std::string serialize() const override;
+    void deserialize(const std::string& data) override;
     
 private:
     double x1_, y1_, x2_, y2_; // 矩形坐标
@@ -197,6 +275,9 @@ public:
     Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Circle; }
     
+    std::string serialize() const override;
+    void deserialize(const std::string& data) override;
+    
 private:
     double centerX_, centerY_, radius_; // 圆心和半径
     double dragStartX_, dragStartY_; // 拖拽起始点
@@ -219,6 +300,9 @@ public:
     void moveControlPoint(int index, double x, double y) override;
     Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Polygon; }
+    
+    std::string serialize() const override;
+    void deserialize(const std::string& data) override;
     
 private:
     std::vector<std::pair<double, double>> vertices_; // 顶点列表
@@ -272,6 +356,20 @@ public:
     void SetCursorCallback(std::function<void(Qt::CursorShape)> callback) {
         cursorCallback = callback;
     }
+    
+    // 撤销系统
+    void ExecuteCommand(std::unique_ptr<Command> command);
+    void Undo();
+    bool CanUndo() const { return !commandHistory.empty(); }
+    
+    // 删除选中的图形
+    void DeleteSelectedShape();
+    
+    // 内部方法（供命令类调用）
+    void AddShapeInternal(std::unique_ptr<VectorShape> shape);
+    std::unique_ptr<VectorShape> RemoveShapeInternal(VectorShape* shape);
+    void InsertShapeInternal(std::unique_ptr<VectorShape> shape, size_t index);
+    size_t GetShapeIndex(VectorShape* shape) const;
 
 protected:
     Selector();
@@ -373,6 +471,13 @@ private:
     int selectedControlPoint;
     bool isDragging;
     double lastMouseX, lastMouseY;
+    
+    // 撤销系统
+    std::stack<std::unique_ptr<Command>> commandHistory;
+    static const size_t MAX_HISTORY_SIZE = 50;
+    
+    // 拖拽前的状态（用于撤销）
+    std::string shapeStateBeforeDrag;
 
     std::function<void(Qt::CursorShape)> cursorCallback;
     
