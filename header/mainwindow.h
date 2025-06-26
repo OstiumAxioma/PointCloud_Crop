@@ -34,8 +34,12 @@ private slots:
     void onRectangleSelection();
     void onCircleSelection();
     void onPolygonSelection();
+    void onClearCanvas();
+    void onConfirmSelection();
     void onClearSelection();
     void onOcclusionDetectionToggled(bool checked);
+    void onViewLockToggled(bool checked);
+    void updateStatusInfo();
 
 private:
     // UI组件
@@ -50,6 +54,8 @@ private:
     QAction *rectangleSelectionAct;
     QAction *circleSelectionAct;
     QAction *polygonSelectionAct;
+    QAction *clearCanvasAct;
+    QAction *confirmSelectionAct;
     QAction *clearSelectionAct;
 };
 

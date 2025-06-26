@@ -171,12 +171,12 @@ void PointCloudViewer::enableRectangleSelection(bool enable)
 {
     if (rectangleSelector) {
         if (!enable) {
-            // 关闭矩形选择时，先清理当前绘制的选择框
-            rectangleSelector->ClearCurrentSelection();
+            // 关闭绘制时，先清理当前绘制的内容
+            rectangleSelector->ClearCurrentDrawing();
         }
         
-        rectangleSelector->SetSelectionShape(SelectionShape::Rectangle);
-        rectangleSelector->EnableRectangleSelection(enable);
+        rectangleSelector->SetCurrentDrawingShape(SelectionShape::Rectangle);
+        rectangleSelector->EnableDrawingMode(enable);
         
         // 设置光标
         if (enable) {
@@ -191,12 +191,12 @@ void PointCloudViewer::enableCircleSelection(bool enable)
 {
     if (rectangleSelector) {
         if (!enable) {
-            // 关闭圆形选择时，先清理当前绘制的选择框
-            rectangleSelector->ClearCurrentSelection();
+            // 关闭绘制时，先清理当前绘制的内容
+            rectangleSelector->ClearCurrentDrawing();
         }
         
-        rectangleSelector->SetSelectionShape(SelectionShape::Circle);
-        rectangleSelector->EnableRectangleSelection(enable);
+        rectangleSelector->SetCurrentDrawingShape(SelectionShape::Circle);
+        rectangleSelector->EnableDrawingMode(enable);
         
         // 设置光标
         if (enable) {
@@ -211,12 +211,12 @@ void PointCloudViewer::enablePolygonSelection(bool enable)
 {
     if (rectangleSelector) {
         if (!enable) {
-            // 关闭多边形选择时，先清理当前绘制的多边形
-            rectangleSelector->ClearCurrentSelection();
+            // 关闭绘制时，先清理当前绘制的内容
+            rectangleSelector->ClearCurrentDrawing();
         }
         
-        rectangleSelector->SetSelectionShape(SelectionShape::Polygon);
-        rectangleSelector->EnableRectangleSelection(enable);
+        rectangleSelector->SetCurrentDrawingShape(SelectionShape::Polygon);
+        rectangleSelector->EnableDrawingMode(enable);
         
         // 设置光标
         if (enable) {
@@ -238,5 +238,42 @@ void PointCloudViewer::enableOcclusionDetection(bool enable)
 {
     if (rectangleSelector) {
         rectangleSelector->EnableOcclusionDetection(enable);
+    }
+}
+
+void PointCloudViewer::clearCanvas()
+{
+    if (rectangleSelector) {
+        rectangleSelector->ClearCanvas();
+    }
+}
+
+void PointCloudViewer::confirmSelection()
+{
+    if (rectangleSelector) {
+        rectangleSelector->ConfirmSelection();
+    }
+}
+
+size_t PointCloudViewer::getCanvasShapeCount() const
+{
+    if (rectangleSelector) {
+        return rectangleSelector->GetCanvasShapeCount();
+    }
+    return 0;
+}
+
+size_t PointCloudViewer::getSelectedPointCount() const
+{
+    if (rectangleSelector) {
+        return rectangleSelector->GetSelectedPointCount();
+    }
+    return 0;
+}
+
+void PointCloudViewer::enableViewLock(bool enable)
+{
+    if (rectangleSelector) {
+        rectangleSelector->EnableViewLock(enable);
     }
 } 

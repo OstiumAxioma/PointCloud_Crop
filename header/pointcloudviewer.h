@@ -48,6 +48,15 @@ public:
     void enablePolygonSelection(bool enable);
     void enableOcclusionDetection(bool enable);
     void clearAllSelectedPoints();
+    
+    // 画布功能
+    void clearCanvas();
+    void confirmSelection();
+    size_t getCanvasShapeCount() const;
+    size_t getSelectedPointCount() const;
+    
+    // 视图锁定功能
+    void enableViewLock(bool enable);
 
 signals:
     // 导入完成信号

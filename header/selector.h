@@ -35,6 +35,84 @@ enum class SelectionShape {
     Polygon
 };
 
+// 形状数据结构
+struct Shape {
+    SelectionShape type;
+    
+    // 矩形参数：左上角和右下角
+    struct Rectangle {
+        double x1, y1, x2, y2;
+    };
+    
+    // 圆形参数：中心点和半径
+    struct Circle {
+        double centerX, centerY, radius;
+    };
+    
+    // 多边形参数：顶点列表
+    struct Polygon {
+        std::vector<std::pair<double, double>> vertices;
+    };
+    
+    union {
+        Rectangle rect;
+        Circle circle;
+        Polygon polygon;
+    };
+    
+    Shape(SelectionShape t) : type(t) {
+        if (type == SelectionShape::Polygon) {
+            new(&polygon) Polygon();
+        }
+    }
+    
+    ~Shape() {
+        if (type == SelectionShape::Polygon) {
+            polygon.~Polygon();
+        }
+    }
+    
+    // 拷贝构造函数
+    Shape(const Shape& other) : type(other.type) {
+        switch (type) {
+            case SelectionShape::Rectangle:
+                rect = other.rect;
+                break;
+            case SelectionShape::Circle:
+                circle = other.circle;
+                break;
+            case SelectionShape::Polygon:
+                new(&polygon) Polygon(other.polygon);
+                break;
+        }
+    }
+    
+    // 赋值运算符
+    Shape& operator=(const Shape& other) {
+        if (this != &other) {
+            if (type == SelectionShape::Polygon) {
+                polygon.~Polygon();
+            }
+            type = other.type;
+            switch (type) {
+                case SelectionShape::Rectangle:
+                    rect = other.rect;
+                    break;
+                case SelectionShape::Circle:
+                    circle = other.circle;
+                    break;
+                case SelectionShape::Polygon:
+                    new(&polygon) Polygon(other.polygon);
+                    break;
+            }
+        }
+        return *this;
+    }
+    
+    // 判断点是否在形状内
+    bool containsPoint(double x, double y) const;
+};
+
 class Selector : public vtkInteractorStyleTrackballCamera
 {
 public:
@@ -45,23 +123,32 @@ public:
     void SetRenderer(vtkRenderer* renderer);
     void SetPointCloudData(vtkPolyData* pointData);
     
-    // 启用/禁用矩形选择模式
-    void EnableRectangleSelection(bool enable);
-    bool IsRectangleSelectionEnabled() const { return rectangleSelectionEnabled; }
+    // 启用/禁用绘制模式
+    void EnableDrawingMode(bool enable);
+    bool IsDrawingModeEnabled() const { return drawingModeEnabled; }
 
     // 启用/禁用遮挡检测
     void EnableOcclusionDetection(bool enable) { occlusionDetectionEnabled = enable; }
     bool IsOcclusionDetectionEnabled() const { return occlusionDetectionEnabled; }
+    
+    // 启用/禁用视图锁定（禁用相机操作）
+    void EnableViewLock(bool enable) { viewLocked = enable; }
+    bool IsViewLocked() const { return viewLocked; }
 
-    // 设置选择框形状
-    void SetSelectionShape(SelectionShape shape) { selectionShape = shape; }
-    SelectionShape GetSelectionShape() const { return selectionShape; }
+    // 设置当前绘制的形状类型
+    void SetCurrentDrawingShape(SelectionShape shape) { currentDrawingShape = shape; }
+    SelectionShape GetCurrentDrawingShape() const { return currentDrawingShape; }
 
+    // 画布操作
+    void ClearCanvas(); // 清空所有已绘制的形状
+    void ConfirmSelection(); // 根据画布上的形状进行选取
+    size_t GetCanvasShapeCount() const { return canvasShapes.size(); }
+    
     // 清除所有选中的点
     void ClearAllSelectedPoints();
     
-    // 清除当前选择状态（包括正在绘制的选择框）
-    void ClearCurrentSelection();
+    // 清除当前正在绘制的形状
+    void ClearCurrentDrawing();
     
     // 获取当前选中的点数量
     size_t GetSelectedPointCount() const { return selectedPointIds.size(); }
@@ -85,34 +172,36 @@ protected:
     virtual void OnKeyPress() override;
 
 private:
-    // 绘制选择矩形
-    void DrawSelectionRectangle();
-    void ClearSelectionRectangle();
+    // 绘制当前正在编辑的形状
+    void DrawCurrentShape();
+    void ClearCurrentShapeDisplay();
     
-    // 绘制选择圆形
-    void DrawSelectionCircle();
-    void ClearSelectionCircle();
+    // 绘制矩形
+    void DrawRectangle(double x1, double y1, double x2, double y2);
     
-    // 绘制选择多边形
-    void DrawSelectionPolygon(bool addTemporaryVertex = true);
-    void ClearSelectionPolygon();
+    // 绘制圆形
+    void DrawCircle(double centerX, double centerY, double radius);
+    
+    // 绘制多边形
+    void DrawPolygon(const std::vector<std::pair<double, double>>& vertices, bool addTemporaryVertex = true);
     void AddPolygonVertex(int x, int y);
     void UndoLastVertex();
-    void CompletePolygonSelection();
+    void CompleteCurrentPolygon();
+    
+    // 多边形辅助方法
     bool IsPointInPolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon);
     
-    // 绘制选择框（通用方法）
-    void DrawSelectionShape();
-    void ClearSelectionShape();
+    // 绘制画布上的所有形状
+    void DrawCanvasShapes();
     
-    // 执行点云选择
-    void PerformPointSelection();
+    // 执行点云选择（基于画布上的所有形状）
+    void PerformCanvasBasedSelection();
     
     // 高亮选中的点
     void HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds);
 
     // 遮挡检测相关方法
-    void PerformOcclusionAwareSelection();
+    void PerformOcclusionAwareSelection(const std::vector<vtkIdType>& candidatePoints);
     std::vector<vtkIdType> FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints,
                                                     const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
                                                     const std::map<vtkIdType, double>& distancesToCamera);
@@ -121,30 +210,39 @@ private:
                         const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
                         double occlusionThreshold = 5.0);
     
-    // 判断点是否在选择区域内
-    bool IsPointInSelectionArea(double screenX, double screenY);
+    // 判断点是否在画布的任意形状内（并集）
+    bool IsPointInCanvasShapes(double screenX, double screenY);
 
     // 成员变量
     vtkSmartPointer<vtkRenderer> renderer;
     vtkSmartPointer<vtkPolyData> originalPointData;
-    vtkSmartPointer<vtkActor> selectionActor;
-    vtkSmartPointer<vtkPolyDataMapper> selectionMapper;
-    vtkSmartPointer<vtkPolyData> selectionPolyData;
     
-    bool rectangleSelectionEnabled;
-    bool isSelecting;
+    // 当前正在绘制的形状显示
+    vtkSmartPointer<vtkPoints> currentShapePoints;
+    vtkSmartPointer<vtkPolyData> currentShapePolyData;
+    vtkSmartPointer<vtkActor2D> currentShapeActor;
+    vtkSmartPointer<vtkPolyDataMapper2D> currentShapeMapper;
+    
+    // 画布形状显示
+    vtkSmartPointer<vtkActor2D> canvasActor;
+    vtkSmartPointer<vtkPolyDataMapper2D> canvasMapper;
+    vtkSmartPointer<vtkPolyData> canvasPolyData;
+    vtkSmartPointer<vtkPoints> canvasPoints;
+    
+    bool drawingModeEnabled;
+    bool isDrawing;
     int startX, startY;
     int currentX, currentY;
     
-    // 多边形相关变量
-    bool isDrawingPolygon;
-    std::vector<std::pair<int, int>> polygonVertices;
+    // 当前绘制的形状类型
+    SelectionShape currentDrawingShape;
     
-    // 选择框的四个角点
-    vtkSmartPointer<vtkPoints> rectanglePoints;
-    vtkSmartPointer<vtkPolyData> rectanglePolyData;
-    vtkSmartPointer<vtkActor2D> rectangleActor;
-    vtkSmartPointer<vtkPolyDataMapper2D> rectangleMapper;
+    // 多边形绘制状态
+    bool isDrawingPolygon;
+    std::vector<std::pair<int, int>> currentPolygonVertices;
+    
+    // 画布：存储所有已绘制的形状
+    std::vector<Shape> canvasShapes;
 
     std::function<void(Qt::CursorShape)> cursorCallback;
     
@@ -156,8 +254,9 @@ private:
 
     // 遮挡检测标志
     bool occlusionDetectionEnabled;
-
-    SelectionShape selectionShape;
+    
+    // 视图锁定标志
+    bool viewLocked;
 };
 
 #endif // SELECTOR_H 
