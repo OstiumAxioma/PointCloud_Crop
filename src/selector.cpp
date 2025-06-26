@@ -16,6 +16,7 @@
 #include <vtkPointData.h>
 #include <vtkLookupTable.h>
 #include <vtkMath.h>
+#include <vtkVertex.h>
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
@@ -25,7 +26,6 @@
 #endif
 
 vtkStandardNewMacro(Selector);
-
 
 // Shape类的containsPoint实现
 bool Shape::containsPoint(double x, double y) const {
@@ -67,6 +67,398 @@ bool Shape::containsPoint(double x, double y) const {
     }
 }
 
+//=============================================================================
+// VectorRectangle 实现
+//=============================================================================
+
+VectorRectangle::VectorRectangle(double x1, double y1, double x2, double y2)
+    : x1_(x1), y1_(y1), x2_(x2), y2_(y2)
+    , dragStartX_(0), dragStartY_(0)
+    , originalX1_(0), originalY1_(0), originalX2_(0), originalY2_(0)
+{
+    normalizeCoordinates();
+}
+
+void VectorRectangle::normalizeCoordinates() {
+    if (x1_ > x2_) std::swap(x1_, x2_);
+    if (y1_ > y2_) std::swap(y1_, y2_);
+}
+
+std::vector<std::pair<double, double>> VectorRectangle::getControlPoints() const {
+    return {
+        {x1_, y1_}, {x2_, y1_}, {x2_, y2_}, {x1_, y2_}, // 四个角
+        {(x1_ + x2_) / 2, y1_}, {x2_, (y1_ + y2_) / 2}, 
+        {(x1_ + x2_) / 2, y2_}, {x1_, (y1_ + y2_) / 2}  // 四个边中点
+    };
+}
+
+void VectorRectangle::draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, 
+                          vtkPolyData* polyData, vtkPoints* points) {
+    // 设置矩形顶点
+    points->SetNumberOfPoints(4);
+    points->SetPoint(0, x2_, y1_, 0); // 右上
+    points->SetPoint(1, x1_, y1_, 0); // 左上
+    points->SetPoint(2, x1_, y2_, 0); // 左下
+    points->SetPoint(3, x2_, y2_, 0); // 右下
+    
+    // 设置线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    for (int i = 0; i < 4; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, (i + 1) % 4);
+        lines->InsertNextCell(line);
+    }
+    polyData->SetLines(lines);
+    
+    // 设置颜色
+    if (isSelected_) {
+        actor->GetProperty()->SetColor(1.0, 0.0, 0.0); // 红色表示选中
+        actor->GetProperty()->SetLineWidth(3.0);
+    } else {
+        actor->GetProperty()->SetColor(0.0, 1.0, 0.0); // 绿色表示正常
+        actor->GetProperty()->SetLineWidth(2.0);
+    }
+}
+
+bool VectorRectangle::hitTest(double x, double y, double tolerance) const {
+    // 检查是否在矩形边界附近
+    return (x >= x1_ - tolerance && x <= x2_ + tolerance && 
+            y >= y1_ - tolerance && y <= y2_ + tolerance) &&
+           (x <= x1_ + tolerance || x >= x2_ - tolerance || 
+            y <= y1_ + tolerance || y >= y2_ - tolerance);
+}
+
+bool VectorRectangle::hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance) const {
+    auto controlPts = getControlPoints();
+    for (size_t i = 0; i < controlPts.size(); ++i) {
+        double dx = x - controlPts[i].first;
+        double dy = y - controlPts[i].second;
+        if (sqrt(dx * dx + dy * dy) <= tolerance) {
+            controlPointIndex = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void VectorRectangle::startDrag(double x, double y) {
+    dragStartX_ = x;
+    dragStartY_ = y;
+    originalX1_ = x1_;
+    originalY1_ = y1_;
+    originalX2_ = x2_;
+    originalY2_ = y2_;
+}
+
+void VectorRectangle::updateDrag(double x, double y, bool shiftPressed) {
+    double dx = x - dragStartX_;
+    double dy = y - dragStartY_;
+    
+    x1_ = originalX1_ + dx;
+    y1_ = originalY1_ + dy;
+    x2_ = originalX2_ + dx;
+    y2_ = originalY2_ + dy;
+}
+
+void VectorRectangle::endDrag() {
+    normalizeCoordinates();
+}
+
+void VectorRectangle::moveControlPoint(int index, double x, double y) {
+    switch (index) {
+        case 0: x1_ = x; y1_ = y; break; // 左上角
+        case 1: x2_ = x; y1_ = y; break; // 右上角
+        case 2: x2_ = x; y2_ = y; break; // 右下角
+        case 3: x1_ = x; y2_ = y; break; // 左下角
+        case 4: y1_ = y; break; // 上边中点
+        case 5: x2_ = x; break; // 右边中点
+        case 6: y2_ = y; break; // 下边中点
+        case 7: x1_ = x; break; // 左边中点
+    }
+    normalizeCoordinates();
+}
+
+Shape VectorRectangle::toShape() const {
+    Shape shape(SelectionShape::Rectangle);
+    shape.rect.x1 = x1_;
+    shape.rect.y1 = y1_;
+    shape.rect.x2 = x2_;
+    shape.rect.y2 = y2_;
+    return shape;
+}
+
+//=============================================================================
+// VectorCircle 实现
+//=============================================================================
+
+VectorCircle::VectorCircle(double centerX, double centerY, double radius)
+    : centerX_(centerX), centerY_(centerY), radius_(radius)
+    , dragStartX_(0), dragStartY_(0)
+    , originalCenterX_(0), originalCenterY_(0), originalRadius_(0)
+{
+}
+
+std::vector<std::pair<double, double>> VectorCircle::getControlPoints() const {
+    return {
+        {centerX_ + radius_, centerY_}, // 右
+        {centerX_, centerY_ - radius_}, // 上
+        {centerX_ - radius_, centerY_}, // 左
+        {centerX_, centerY_ + radius_}  // 下
+    };
+}
+
+void VectorCircle::draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, 
+                       vtkPolyData* polyData, vtkPoints* points) {
+    const int numPoints = 64;
+    points->SetNumberOfPoints(numPoints);
+    
+    for (int i = 0; i < numPoints; ++i) {
+        double angle = 2.0 * M_PI * i / numPoints;
+        double x = centerX_ + radius_ * cos(angle);
+        double y = centerY_ + radius_ * sin(angle);
+        points->SetPoint(i, x, y, 0);
+    }
+    
+    // 设置线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    for (int i = 0; i < numPoints; ++i) {
+        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+        line->GetPointIds()->SetId(0, i);
+        line->GetPointIds()->SetId(1, (i + 1) % numPoints);
+        lines->InsertNextCell(line);
+    }
+    polyData->SetLines(lines);
+    
+    // 设置颜色
+    if (isSelected_) {
+        actor->GetProperty()->SetColor(1.0, 0.0, 0.0); // 红色表示选中
+        actor->GetProperty()->SetLineWidth(3.0);
+    } else {
+        actor->GetProperty()->SetColor(0.0, 1.0, 0.0); // 绿色表示正常
+        actor->GetProperty()->SetLineWidth(2.0);
+    }
+}
+
+bool VectorCircle::hitTest(double x, double y, double tolerance) const {
+    double distance = sqrt(pow(x - centerX_, 2) + pow(y - centerY_, 2));
+    return abs(distance - radius_) <= tolerance;
+}
+
+bool VectorCircle::hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance) const {
+    auto controlPts = getControlPoints();
+    for (size_t i = 0; i < controlPts.size(); ++i) {
+        double dx = x - controlPts[i].first;
+        double dy = y - controlPts[i].second;
+        if (sqrt(dx * dx + dy * dy) <= tolerance) {
+            controlPointIndex = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void VectorCircle::startDrag(double x, double y) {
+    dragStartX_ = x;
+    dragStartY_ = y;
+    originalCenterX_ = centerX_;
+    originalCenterY_ = centerY_;
+    originalRadius_ = radius_;
+}
+
+void VectorCircle::updateDrag(double x, double y, bool shiftPressed) {
+    double dx = x - dragStartX_;
+    double dy = y - dragStartY_;
+    
+    centerX_ = originalCenterX_ + dx;
+    centerY_ = originalCenterY_ + dy;
+}
+
+void VectorCircle::endDrag() {
+    // 圆形拖拽结束无需特殊处理
+}
+
+void VectorCircle::moveControlPoint(int index, double x, double y) {
+    // 计算新半径
+    double dx = x - centerX_;
+    double dy = y - centerY_;
+    radius_ = sqrt(dx * dx + dy * dy);
+}
+
+Shape VectorCircle::toShape() const {
+    Shape shape(SelectionShape::Circle);
+    shape.circle.centerX = centerX_;
+    shape.circle.centerY = centerY_;
+    shape.circle.radius = radius_;
+    return shape;
+}
+
+//=============================================================================
+// VectorPolygon 实现
+//=============================================================================
+
+VectorPolygon::VectorPolygon(const std::vector<std::pair<double, double>>& vertices)
+    : vertices_(vertices)
+    , dragStartX_(0), dragStartY_(0)
+{
+}
+
+bool VectorPolygon::isPointInPolygon(double x, double y) const {
+    if (vertices_.size() < 3) return false;
+    
+    bool inside = false;
+    size_t j = vertices_.size() - 1;
+    
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        double xi = vertices_[i].first;
+        double yi = vertices_[i].second;
+        double xj = vertices_[j].first;
+        double yj = vertices_[j].second;
+        
+        if (((yi > y) != (yj > y)) && 
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    
+    return inside;
+}
+
+void VectorPolygon::draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, 
+                        vtkPolyData* polyData, vtkPoints* points) {
+    if (vertices_.empty()) return;
+    
+    points->SetNumberOfPoints(vertices_.size());
+    
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        points->SetPoint(i, vertices_[i].first, vertices_[i].second, 0);
+    }
+    
+    // 设置线条连接
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    if (vertices_.size() >= 2) {
+        for (size_t i = 0; i < vertices_.size() - 1; ++i) {
+            vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+            line->GetPointIds()->SetId(0, i);
+            line->GetPointIds()->SetId(1, i + 1);
+            lines->InsertNextCell(line);
+        }
+        
+        // 闭合多边形
+        if (vertices_.size() > 2) {
+            vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
+            closingLine->GetPointIds()->SetId(0, vertices_.size() - 1);
+            closingLine->GetPointIds()->SetId(1, 0);
+            lines->InsertNextCell(closingLine);
+        }
+    }
+    polyData->SetLines(lines);
+    
+    // 设置颜色
+    if (isSelected_) {
+        actor->GetProperty()->SetColor(1.0, 0.0, 0.0); // 红色表示选中
+        actor->GetProperty()->SetLineWidth(3.0);
+    } else {
+        actor->GetProperty()->SetColor(0.0, 1.0, 0.0); // 绿色表示正常
+        actor->GetProperty()->SetLineWidth(2.0);
+    }
+}
+
+bool VectorPolygon::hitTest(double x, double y, double tolerance) const {
+    if (vertices_.size() < 2) return false;
+    
+    // 检查是否在多边形边界附近
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        size_t j = (i + 1) % vertices_.size();
+        double x1 = vertices_[i].first;
+        double y1 = vertices_[i].second;
+        double x2 = vertices_[j].first;
+        double y2 = vertices_[j].second;
+        
+        // 计算点到线段的距离
+        double A = x - x1;
+        double B = y - y1;
+        double C = x2 - x1;
+        double D = y2 - y1;
+        
+        double dot = A * C + B * D;
+        double lenSq = C * C + D * D;
+        double param = (lenSq != 0) ? dot / lenSq : -1;
+        
+        double xx, yy;
+        if (param < 0) {
+            xx = x1;
+            yy = y1;
+        } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+        } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+        }
+        
+        double dx = x - xx;
+        double dy = y - yy;
+        double distance = sqrt(dx * dx + dy * dy);
+        
+        if (distance <= tolerance) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool VectorPolygon::hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance) const {
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        double dx = x - vertices_[i].first;
+        double dy = y - vertices_[i].second;
+        if (sqrt(dx * dx + dy * dy) <= tolerance) {
+            controlPointIndex = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void VectorPolygon::startDrag(double x, double y) {
+    dragStartX_ = x;
+    dragStartY_ = y;
+    originalVertices_ = vertices_;
+}
+
+void VectorPolygon::updateDrag(double x, double y, bool shiftPressed) {
+    double dx = x - dragStartX_;
+    double dy = y - dragStartY_;
+    
+    for (size_t i = 0; i < vertices_.size(); ++i) {
+        vertices_[i].first = originalVertices_[i].first + dx;
+        vertices_[i].second = originalVertices_[i].second + dy;
+    }
+}
+
+void VectorPolygon::endDrag() {
+    // 多边形拖拽结束无需特殊处理
+}
+
+void VectorPolygon::moveControlPoint(int index, double x, double y) {
+    if (index >= 0 && index < static_cast<int>(vertices_.size())) {
+        vertices_[index].first = x;
+        vertices_[index].second = y;
+    }
+}
+
+Shape VectorPolygon::toShape() const {
+    Shape shape(SelectionShape::Polygon);
+    shape.polygon.vertices = vertices_;
+    return shape;
+}
+
+//=============================================================================
+// Selector 实现
+//=============================================================================
+
 Selector::Selector()
     : drawingModeEnabled(false)
     , isDrawing(false)
@@ -78,7 +470,33 @@ Selector::Selector()
     , occlusionDetectionEnabled(true)
     , isDrawingPolygon(false)
     , viewLocked(false)
+    , selectedShape(nullptr)
+    , currentOperation(EditOperation::None)
+    , selectedControlPoint(-1)
+    , isDragging(false)
+    , lastMouseX(0)
+    , lastMouseY(0)
 {
+    // 初始化矢量图形显示
+    vectorShapePoints = vtkSmartPointer<vtkPoints>::New();
+    vectorShapePolyData = vtkSmartPointer<vtkPolyData>::New();
+    vectorShapePolyData->SetPoints(vectorShapePoints);
+    vectorShapeMapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
+    vectorShapeMapper->SetInputData(vectorShapePolyData);
+    vectorShapeActor = vtkSmartPointer<vtkActor2D>::New();
+    vectorShapeActor->SetMapper(vectorShapeMapper);
+    
+    // 初始化控制点显示
+    controlPoints = vtkSmartPointer<vtkPoints>::New();
+    controlPolyData = vtkSmartPointer<vtkPolyData>::New();
+    controlPolyData->SetPoints(controlPoints);
+    controlMapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
+    controlMapper->SetInputData(controlPolyData);
+    controlActor = vtkSmartPointer<vtkActor2D>::New();
+    controlActor->SetMapper(controlMapper);
+    controlActor->GetProperty()->SetColor(1.0, 1.0, 0.0); // 黄色控制点
+    controlActor->GetProperty()->SetPointSize(8.0);
+    
     // 初始化当前形状显示
     currentShapePoints = vtkSmartPointer<vtkPoints>::New();
     currentShapePolyData = vtkSmartPointer<vtkPolyData>::New();
@@ -90,22 +508,12 @@ Selector::Selector()
     currentShapeActor->GetProperty()->SetColor(1.0, 1.0, 0.0); // 黄色，表示正在绘制
     currentShapeActor->GetProperty()->SetLineWidth(2.0);
     
-    // 初始化画布显示
-    canvasPoints = vtkSmartPointer<vtkPoints>::New();
-    canvasPolyData = vtkSmartPointer<vtkPolyData>::New();
-    canvasPolyData->SetPoints(canvasPoints);
-    canvasMapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
-    canvasMapper->SetInputData(canvasPolyData);
-    canvasActor = vtkSmartPointer<vtkActor2D>::New();
-    canvasActor->SetMapper(canvasMapper);
-    canvasActor->GetProperty()->SetColor(0.0, 1.0, 0.0); // 绿色，表示已确定的形状
-    canvasActor->GetProperty()->SetLineWidth(2.0);
-    
     // 设置2D坐标系统为屏幕坐标
     vtkSmartPointer<vtkCoordinate> coord = vtkSmartPointer<vtkCoordinate>::New();
     coord->SetCoordinateSystem(0); // VTK_DISPLAY = 0，屏幕坐标
+    vectorShapeMapper->SetTransformCoordinate(coord);
+    controlMapper->SetTransformCoordinate(coord);
     currentShapeMapper->SetTransformCoordinate(coord);
-    canvasMapper->SetTransformCoordinate(coord);
 }
 
 Selector::~Selector()
@@ -116,10 +524,12 @@ void Selector::SetRenderer(vtkRenderer* ren)
 {
     renderer = ren;
     if (renderer) {
+        renderer->AddActor2D(vectorShapeActor);
+        renderer->AddActor2D(controlActor);
         renderer->AddActor2D(currentShapeActor);
-        renderer->AddActor2D(canvasActor);
-        currentShapeActor->SetVisibility(0); // 初始隐藏
-        canvasActor->SetVisibility(0); // 初始隐藏
+        vectorShapeActor->SetVisibility(0);
+        controlActor->SetVisibility(0);
+        currentShapeActor->SetVisibility(0);
     }
 }
 
@@ -138,17 +548,18 @@ void Selector::EnableDrawingMode(bool enable)
 
 void Selector::ClearCanvas()
 {
-    canvasShapes.clear();
-    canvasActor->SetVisibility(0);
+    vectorShapes.clear();
+    DeselectAllShapes();
+    vectorShapeActor->SetVisibility(0);
+    controlActor->SetVisibility(0);
     if (renderer) {
-    renderer->GetRenderWindow()->Render();
+        renderer->GetRenderWindow()->Render();
     }
     qDebug() << "画布已清空";
 }
 
 void Selector::ClearCurrentDrawing()
 {
-    // 清除当前正在绘制的形状
     isDrawing = false;
     isDrawingPolygon = false;
     currentPolygonVertices.clear();
@@ -161,45 +572,266 @@ void Selector::ClearCurrentDrawing()
     qDebug() << "已清除当前绘制状态";
 }
 
-void Selector::OnLeftButtonDown()
+void Selector::UpdateVectorShapeDisplay()
 {
-    if (!drawingModeEnabled) {
-        if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnLeftButtonDown();
+    if (!renderer || vectorShapes.empty()) {
+        vectorShapeActor->SetVisibility(0);
+        controlActor->SetVisibility(0);
+        if (renderer) {
+            renderer->GetRenderWindow()->Render();
         }
         return;
     }
     
+    // 计算所有形状所需的总点数
+    size_t totalPoints = 0;
+    for (const auto& shape : vectorShapes) {
+        switch (shape->getType()) {
+            case SelectionShape::Rectangle:
+                totalPoints += 4;
+                break;
+            case SelectionShape::Circle:
+                totalPoints += 64;
+                break;
+            case SelectionShape::Polygon: {
+                auto* polygon = static_cast<VectorPolygon*>(shape.get());
+                totalPoints += polygon->toShape().polygon.vertices.size();
+                break;
+            }
+        }
+    }
+    
+    if (totalPoints == 0) {
+        vectorShapeActor->SetVisibility(0);
+        controlActor->SetVisibility(0);
+        if (renderer) {
+            renderer->GetRenderWindow()->Render();
+        }
+        return;
+    }
+    
+    // 绘制所有矢量形状
+    vectorShapePoints->SetNumberOfPoints(totalPoints);
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    
+    size_t pointIndex = 0;
+    for (const auto& shape : vectorShapes) {
+        // 每个形状单独绘制，以便设置不同的颜色
+        vtkSmartPointer<vtkPoints> shapePoints = vtkSmartPointer<vtkPoints>::New();
+        vtkSmartPointer<vtkPolyData> shapePolyData = vtkSmartPointer<vtkPolyData>::New();
+        shapePolyData->SetPoints(shapePoints);
+        
+        shape->draw(renderer, vectorShapeActor, vectorShapeMapper, shapePolyData, shapePoints);
+        
+        // 复制点到主要的点集
+        for (vtkIdType i = 0; i < shapePoints->GetNumberOfPoints(); ++i) {
+            double point[3];
+            shapePoints->GetPoint(i, point);
+            vectorShapePoints->SetPoint(pointIndex + i, point);
+        }
+        
+        // 复制线到主要的线集
+        vtkCellArray* shapeLines = shapePolyData->GetLines();
+        if (shapeLines) {
+            shapeLines->InitTraversal();
+            vtkSmartPointer<vtkIdList> idList = vtkSmartPointer<vtkIdList>::New();
+            while (shapeLines->GetNextCell(idList)) {
+                vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+                for (vtkIdType i = 0; i < idList->GetNumberOfIds(); ++i) {
+                    line->GetPointIds()->SetId(i, pointIndex + idList->GetId(i));
+                }
+                lines->InsertNextCell(line);
+            }
+        }
+        
+        pointIndex += shapePoints->GetNumberOfPoints();
+    }
+    
+    vectorShapePolyData->SetLines(lines);
+    vectorShapePoints->Modified();
+    vectorShapePolyData->Modified();
+    vectorShapeActor->SetVisibility(1);
+    
+    // 绘制控制点
+    DrawControlPoints();
+    
+    if (renderer) {
+        renderer->GetRenderWindow()->Render();
+    }
+}
+
+void Selector::DrawControlPoints()
+{
+    if (!selectedShape) {
+        controlActor->SetVisibility(0);
+        return;
+    }
+    
+    std::vector<std::pair<double, double>> controlPts;
+    
+    if (selectedShape->getType() == SelectionShape::Rectangle) {
+        auto* rect = static_cast<VectorRectangle*>(selectedShape);
+        auto rectShape = rect->toShape();
+        controlPts = {
+            {rectShape.rect.x1, rectShape.rect.y1}, {rectShape.rect.x2, rectShape.rect.y1}, 
+            {rectShape.rect.x2, rectShape.rect.y2}, {rectShape.rect.x1, rectShape.rect.y2}, // 四个角
+            {(rectShape.rect.x1 + rectShape.rect.x2) / 2, rectShape.rect.y1}, 
+            {rectShape.rect.x2, (rectShape.rect.y1 + rectShape.rect.y2) / 2}, 
+            {(rectShape.rect.x1 + rectShape.rect.x2) / 2, rectShape.rect.y2}, 
+            {rectShape.rect.x1, (rectShape.rect.y1 + rectShape.rect.y2) / 2}  // 四个边中点
+        };
+    } else if (selectedShape->getType() == SelectionShape::Circle) {
+        auto* circle = static_cast<VectorCircle*>(selectedShape);
+        auto circleShape = circle->toShape();
+        controlPts = {
+            {circleShape.circle.centerX + circleShape.circle.radius, circleShape.circle.centerY}, // 右
+            {circleShape.circle.centerX, circleShape.circle.centerY - circleShape.circle.radius}, // 上
+            {circleShape.circle.centerX - circleShape.circle.radius, circleShape.circle.centerY}, // 左
+            {circleShape.circle.centerX, circleShape.circle.centerY + circleShape.circle.radius}  // 下
+        };
+    } else if (selectedShape->getType() == SelectionShape::Polygon) {
+        auto* polygon = static_cast<VectorPolygon*>(selectedShape);
+        auto polygonShape = polygon->toShape();
+        controlPts = polygonShape.polygon.vertices;
+    }
+    
+    if (controlPts.empty()) {
+        controlActor->SetVisibility(0);
+        return;
+    }
+    
+    controlPoints->SetNumberOfPoints(controlPts.size());
+    for (size_t i = 0; i < controlPts.size(); ++i) {
+        controlPoints->SetPoint(i, controlPts[i].first, controlPts[i].second, 0);
+    }
+    
+    // 创建顶点
+    vtkSmartPointer<vtkCellArray> vertices = vtkSmartPointer<vtkCellArray>::New();
+    for (size_t i = 0; i < controlPts.size(); ++i) {
+        vtkSmartPointer<vtkVertex> vertex = vtkSmartPointer<vtkVertex>::New();
+        vertex->GetPointIds()->SetId(0, i);
+        vertices->InsertNextCell(vertex);
+    }
+    controlPolyData->SetVerts(vertices);
+    
+    controlPoints->Modified();
+    controlPolyData->Modified();
+    controlActor->SetVisibility(1);
+}
+
+VectorShape* Selector::GetShapeAtPosition(double x, double y)
+{
+    for (auto& shape : vectorShapes) {
+        if (shape->hitTest(x, y)) {
+            return shape.get();
+        }
+    }
+    return nullptr;
+}
+
+void Selector::SelectShape(VectorShape* shape)
+{
+    DeselectAllShapes();
+    if (shape) {
+        selectedShape = shape;
+        shape->setSelected(true);
+        UpdateVectorShapeDisplay();
+        
+        if (cursorCallback) {
+            cursorCallback(Qt::SizeAllCursor);
+        }
+    }
+}
+
+void Selector::DeselectAllShapes()
+{
+    selectedShape = nullptr;
+    for (auto& shape : vectorShapes) {
+        shape->setSelected(false);
+    }
+    controlActor->SetVisibility(0);
+    
+    if (cursorCallback) {
+        cursorCallback(Qt::ArrowCursor);
+    }
+}
+
+void Selector::OnLeftButtonDown()
+{
+    if (!drawingModeEnabled) {
+        // 编辑模式：处理图形选择和编辑
+        int x, y;
+        this->GetInteractor()->GetEventPosition(x, y);
+        
+        // 检查是否点击了控制点
+        if (selectedShape) {
+            int controlPointIndex = -1;
+            if (selectedShape->hitTestControlPoint(x, y, controlPointIndex)) {
+                currentOperation = EditOperation::EditVertex;
+                selectedControlPoint = controlPointIndex;
+                isDragging = true;
+                lastMouseX = x;
+                lastMouseY = y;
+                
+                if (cursorCallback) {
+                    cursorCallback(Qt::PointingHandCursor);
+                }
+                return;
+            }
+        }
+        
+        // 检查是否点击了图形
+        VectorShape* clickedShape = GetShapeAtPosition(x, y);
+        if (clickedShape) {
+            if (clickedShape != selectedShape) {
+                SelectShape(clickedShape);
+            }
+            
+            // 开始拖拽图形
+            currentOperation = EditOperation::Move;
+            isDragging = true;
+            lastMouseX = x;
+            lastMouseY = y;
+            selectedShape->startDrag(x, y);
+            
+            if (cursorCallback) {
+                cursorCallback(Qt::SizeAllCursor);
+            }
+        } else {
+            // 点击空白区域，取消选择
+            DeselectAllShapes();
+            
+            if (!viewLocked) {
+                vtkInteractorStyleTrackballCamera::OnLeftButtonDown();
+            }
+        }
+        return;
+    }
+    
+    // 绘制模式：原有逻辑
     int x, y;
     this->GetInteractor()->GetEventPosition(x, y);
     
     if (currentDrawingShape == SelectionShape::Polygon) {
-        // 多边形模式下的左键处理
         if (!isDrawingPolygon) {
-            // 开始绘制多边形
             isDrawingPolygon = true;
             currentPolygonVertices.clear();
         }
         
-        // 更新当前鼠标位置
         currentX = x;
         currentY = y;
-        
-        // 添加顶点
         AddPolygonVertex(x, y);
         
         if (cursorCallback) {
             cursorCallback(Qt::CrossCursor);
         }
     } else {
-        // 矩形和圆形模式的处理
         isDrawing = true;
         startX = x;
         startY = y;
         currentX = startX;
         currentY = startY;
         
-        // 显示当前形状
         currentShapeActor->SetVisibility(1);
         DrawCurrentShape();
         
@@ -212,52 +844,66 @@ void Selector::OnLeftButtonDown()
 void Selector::OnLeftButtonUp()
 {
     if (!drawingModeEnabled) {
-        if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
+        // 编辑模式：结束拖拽操作
+        if (isDragging) {
+            if (selectedShape) {
+                selectedShape->endDrag();
+                UpdateVectorShapeDisplay();
+            }
+            
+            isDragging = false;
+            currentOperation = EditOperation::None;
+            selectedControlPoint = -1;
+            
+            if (cursorCallback) {
+                if (selectedShape) {
+                    cursorCallback(Qt::SizeAllCursor);
+                } else {
+                    cursorCallback(Qt::ArrowCursor);
+                }
+            }
+        } else if (!viewLocked) {
+            vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
         }
         return;
     }
     
+    // 绘制模式：原有逻辑
     if (currentDrawingShape == SelectionShape::Polygon) {
-        // 多边形模式下左键抬起不执行任何操作，等待右键完成
         return;
     }
     
-            if (!isDrawing) {
-            if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
-            }
+    if (!isDrawing) {
+        if (!viewLocked) {
+            vtkInteractorStyleTrackballCamera::OnLeftButtonUp();
+        }
         return;
     }
     
     isDrawing = false;
     
-    // 将当前形状添加到画布
-    Shape newShape(currentDrawingShape);
+    // 将当前形状添加到矢量图形列表
     switch (currentDrawingShape) {
         case SelectionShape::Rectangle: {
-            newShape.rect.x1 = startX;
-            newShape.rect.y1 = startY;
-            newShape.rect.x2 = currentX;
-            newShape.rect.y2 = currentY;
+            vectorShapes.push_back(std::make_unique<VectorRectangle>(startX, startY, currentX, currentY));
             break;
         }
         case SelectionShape::Circle: {
-            newShape.circle.centerX = (startX + currentX) / 2.0;
-            newShape.circle.centerY = (startY + currentY) / 2.0;
-            newShape.circle.radius = sqrt(pow(currentX - startX, 2) + pow(currentY - startY, 2)) / 2.0;
+            double centerX = (startX + currentX) / 2.0;
+            double centerY = (startY + currentY) / 2.0;
+            double radius = sqrt(pow(currentX - startX, 2) + pow(currentY - startY, 2)) / 2.0;
+            vectorShapes.push_back(std::make_unique<VectorCircle>(centerX, centerY, radius));
             break;
         }
         default:
             break;
     }
     
-    canvasShapes.push_back(newShape);
-    qDebug() << "形状已添加到画布，当前画布形状数：" << canvasShapes.size();
+    qDebug() << "形状已添加到画布，当前画布形状数：" << vectorShapes.size();
     
-    // 隐藏当前形状显示，显示画布
+    // 隐藏当前形状显示，显示矢量图形
     currentShapeActor->SetVisibility(0);
-    DrawCanvasShapes();
+    UpdateVectorShapeDisplay();
     
     if (cursorCallback) {
         cursorCallback(Qt::ArrowCursor);
@@ -268,17 +914,16 @@ void Selector::OnRightButtonDown()
 {
     if (!drawingModeEnabled) {
         if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnRightButtonDown();
+            vtkInteractorStyleTrackballCamera::OnRightButtonDown();
         }
         return;
     }
     
     if (currentDrawingShape == SelectionShape::Polygon && isDrawingPolygon) {
-        // 完成多边形绘制
         CompleteCurrentPolygon();
     } else {
         if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnRightButtonDown();
+            vtkInteractorStyleTrackballCamera::OnRightButtonDown();
         }
     }
 }
@@ -287,39 +932,63 @@ void Selector::OnKeyPress()
 {
     if (!drawingModeEnabled) {
         if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnKeyPress();
+            vtkInteractorStyleTrackballCamera::OnKeyPress();
         }
         return;
     }
     
-    // 获取按键信息
     vtkRenderWindowInteractor *rwi = this->Interactor;
     std::string key = rwi->GetKeySym();
     
     if (currentDrawingShape == SelectionShape::Polygon && isDrawingPolygon) {
         if (key == "BackSpace") {
-            // 撤销最后一个顶点
             UndoLastVertex();
             return;
         }
     }
     
-    // 调用父类方法处理其他按键
     if (!viewLocked) {
-    vtkInteractorStyleTrackballCamera::OnKeyPress();
+        vtkInteractorStyleTrackballCamera::OnKeyPress();
     }
 }
 
 void Selector::OnMouseMove()
 {
-    if (!drawingModeEnabled || (!isDrawing && !isDrawingPolygon)) {
-        if (!viewLocked) {
-        vtkInteractorStyleTrackballCamera::OnMouseMove();
+    int x, y;
+    this->GetInteractor()->GetEventPosition(x, y);
+    
+    if (!drawingModeEnabled) {
+        // 编辑模式：处理拖拽操作
+        if (isDragging && selectedShape) {
+            // 检查是否按下了Shift键
+            bool shiftPressed = (this->GetInteractor()->GetShiftKey() != 0);
+            
+            if (currentOperation == EditOperation::Move) {
+                selectedShape->updateDrag(x, y, shiftPressed);
+                UpdateVectorShapeDisplay();
+            } else if (currentOperation == EditOperation::EditVertex && selectedControlPoint >= 0) {
+                selectedShape->moveControlPoint(selectedControlPoint, x, y);
+                UpdateVectorShapeDisplay();
+            }
+            
+            lastMouseX = x;
+            lastMouseY = y;
+        } else if (!viewLocked) {
+            vtkInteractorStyleTrackballCamera::OnMouseMove();
         }
         return;
     }
     
-        this->GetInteractor()->GetEventPosition(currentX, currentY);
+    // 绘制模式：原有逻辑
+    if (!isDrawing && !isDrawingPolygon) {
+        if (!viewLocked) {
+            vtkInteractorStyleTrackballCamera::OnMouseMove();
+        }
+        return;
+    }
+    
+    currentX = x;
+    currentY = y;
     DrawCurrentShape();
 }
 
@@ -424,8 +1093,8 @@ void Selector::DrawCircle(double centerX, double centerY, double radius)
     
     currentShapePoints->Modified();
     currentShapePolyData->Modified();
-        renderer->GetRenderWindow()->Render();
-    }
+    renderer->GetRenderWindow()->Render();
+}
 
 void Selector::DrawPolygon(const std::vector<std::pair<double, double>>& vertices, bool addTemporaryVertex)
 {
@@ -525,18 +1194,18 @@ void Selector::CompleteCurrentPolygon()
     
     isDrawingPolygon = false;
     
-    // 将多边形添加到画布
-    Shape newShape(SelectionShape::Polygon);
+    // 将多边形添加到矢量图形列表
+    std::vector<std::pair<double, double>> vertices;
     for (const auto& vertex : currentPolygonVertices) {
-        newShape.polygon.vertices.emplace_back(vertex.first, vertex.second);
+        vertices.emplace_back(vertex.first, vertex.second);
     }
+    vectorShapes.push_back(std::make_unique<VectorPolygon>(vertices));
     
-    canvasShapes.push_back(newShape);
-    qDebug() << "多边形已添加到画布，当前画布形状数：" << canvasShapes.size();
+    qDebug() << "多边形已添加到画布，当前画布形状数：" << vectorShapes.size();
     
-    // 隐藏当前形状显示，显示画布
+    // 隐藏当前形状显示，显示矢量图形
     currentShapeActor->SetVisibility(0);
-    DrawCanvasShapes();
+    UpdateVectorShapeDisplay();
     
     // 清空顶点列表
     currentPolygonVertices.clear();
@@ -548,178 +1217,41 @@ void Selector::CompleteCurrentPolygon()
     qDebug() << "多边形绘制完成";
 }
 
-void Selector::DrawCanvasShapes()
-{
-    if (!renderer || canvasShapes.empty()) {
-        canvasActor->SetVisibility(0);
-        renderer->GetRenderWindow()->Render();
-        return;
-    }
-    
-    // 计算所有形状所需的总点数
-    size_t totalPoints = 0;
-    for (const auto& shape : canvasShapes) {
-        switch (shape.type) {
-            case SelectionShape::Rectangle:
-                totalPoints += 4;
-                break;
-            case SelectionShape::Circle:
-                totalPoints += 64;
-                break;
-            case SelectionShape::Polygon:
-                totalPoints += shape.polygon.vertices.size();
-                break;
-        }
-    }
-    
-    if (totalPoints == 0) {
-        canvasActor->SetVisibility(0);
-        renderer->GetRenderWindow()->Render();
-        return;
-    }
-    
-    // 设置总点数
-    canvasPoints->SetNumberOfPoints(totalPoints);
-    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
-    
-    size_t pointIndex = 0;
-    
-    // 绘制所有形状
-    
-    for (size_t shapeIdx = 0; shapeIdx < canvasShapes.size(); ++shapeIdx) {
-        const auto& shape = canvasShapes[shapeIdx];
-        switch (shape.type) {
-            case SelectionShape::Rectangle: {
-                // 绘制矩形
-                double x1 = std::min(shape.rect.x1, shape.rect.x2);
-                double x2 = std::max(shape.rect.x1, shape.rect.x2);
-                double y1 = std::min(shape.rect.y1, shape.rect.y2);
-                double y2 = std::max(shape.rect.y1, shape.rect.y2);
-                
-                canvasPoints->SetPoint(pointIndex, x2, y1, 0);
-                canvasPoints->SetPoint(pointIndex + 1, x1, y1, 0);
-                canvasPoints->SetPoint(pointIndex + 2, x1, y2, 0);
-                canvasPoints->SetPoint(pointIndex + 3, x2, y2, 0);
-                
-                // 连接矩形的边
-                for (int i = 0; i < 4; ++i) {
-                    vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-                    line->GetPointIds()->SetId(0, pointIndex + i);
-                    line->GetPointIds()->SetId(1, pointIndex + (i + 1) % 4);
-                    lines->InsertNextCell(line);
-                }
-                pointIndex += 4;
-                break;
-            }
-            case SelectionShape::Circle: {
-                // 绘制圆形
-                const int numPoints = 64;
-                for (int i = 0; i < numPoints; ++i) {
-                    double angle = 2.0 * M_PI * i / numPoints;
-                    double x = shape.circle.centerX + shape.circle.radius * cos(angle);
-                    double y = shape.circle.centerY + shape.circle.radius * sin(angle);
-                    canvasPoints->SetPoint(pointIndex + i, x, y, 0);
-                }
-                
-                // 连接圆形的边
-                for (int i = 0; i < numPoints; ++i) {
-                    vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-                    line->GetPointIds()->SetId(0, pointIndex + i);
-                    line->GetPointIds()->SetId(1, pointIndex + (i + 1) % numPoints);
-                    lines->InsertNextCell(line);
-                }
-                pointIndex += numPoints;
-                break;
-            }
-            case SelectionShape::Polygon: {
-                // 绘制多边形
-                for (size_t i = 0; i < shape.polygon.vertices.size(); ++i) {
-                    canvasPoints->SetPoint(pointIndex + i, 
-                                         shape.polygon.vertices[i].first, 
-                                         shape.polygon.vertices[i].second, 0);
-                }
-                
-                // 连接多边形的边
-                if (shape.polygon.vertices.size() >= 2) {
-                    for (size_t i = 0; i < shape.polygon.vertices.size() - 1; ++i) {
-                        vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-                        line->GetPointIds()->SetId(0, pointIndex + i);
-                        line->GetPointIds()->SetId(1, pointIndex + i + 1);
-                        lines->InsertNextCell(line);
-                    }
-                    
-                    // 闭合多边形
-                    if (shape.polygon.vertices.size() > 2) {
-                        vtkSmartPointer<vtkLine> closingLine = vtkSmartPointer<vtkLine>::New();
-                        closingLine->GetPointIds()->SetId(0, pointIndex + shape.polygon.vertices.size() - 1);
-                        closingLine->GetPointIds()->SetId(1, pointIndex);
-                        lines->InsertNextCell(closingLine);
-                    }
-                }
-                pointIndex += shape.polygon.vertices.size();
-                break;
-            }
-        }
-    }
-    
-    canvasPolyData->SetLines(lines);
-    canvasPoints->Modified();
-    canvasPolyData->Modified();
-    
-    // 设置画布颜色为更明显的绿色，并增加线宽
-    canvasActor->GetProperty()->SetColor(0.0, 1.0, 0.2); // 明亮的绿色
-    canvasActor->GetProperty()->SetLineWidth(3.0); // 增加线宽使其更明显
-    canvasActor->SetVisibility(1);
-    renderer->GetRenderWindow()->Render();
-}
-
 void Selector::ConfirmSelection()
 {
-    if (!renderer || !originalPointData || canvasShapes.empty()) {
+    if (!renderer || !originalPointData || vectorShapes.empty()) {
         qDebug() << "无法执行选择：缺少必要的数据或画布为空";
         return;
     }
     
-    // 基于画布形状进行点云选择
-    PerformCanvasBasedSelection();
+    // 将矢量图形转换为原有的Shape格式进行选取
+    std::vector<Shape> shapes;
+    for (const auto& vectorShape : vectorShapes) {
+        shapes.push_back(vectorShape->toShape());
+    }
+    
+    // 基于转换后的形状进行点云选择
+    PerformCanvasBasedSelection(shapes);
     
     // 选取完成后自动清空画布
     ClearCanvas();
 }
 
-void Selector::ClearAllSelectedPoints()
-{
-    if (!renderer || !originalPointData || originalColorBackup.empty()) return;
-    
-    // 获取原始点云的颜色数据
-    vtkUnsignedCharArray* originalColors = vtkUnsignedCharArray::SafeDownCast(
-        originalPointData->GetPointData()->GetScalars());
-    
-    if (!originalColors) return;
-    
-    // 恢复所有点的原始颜色
-    for (vtkIdType i = 0; i < originalColors->GetNumberOfTuples(); ++i) {
-        unsigned char* color = originalColors->GetPointer(i * 3);
-        color[0] = originalColorBackup[i * 3];
-        color[1] = originalColorBackup[i * 3 + 1];
-        color[2] = originalColorBackup[i * 3 + 2];
-    }
-    
-    // 标记颜色数据已修改
-    originalColors->Modified();
-    
-    // 清空选中点列表
-    selectedPointIds.clear();
-    
-    // 刷新渲染
-    renderer->GetRenderWindow()->Render();
-    
-    qDebug() << "已清除所有选中点";
-}
-
 void Selector::PerformCanvasBasedSelection()
 {
-    if (!renderer || !originalPointData || canvasShapes.empty()) return;
+    // 将矢量图形转换为原有的Shape格式进行选取
+    std::vector<Shape> shapes;
+    for (const auto& vectorShape : vectorShapes) {
+        shapes.push_back(vectorShape->toShape());
+    }
+    
+    // 调用带参数的版本
+    PerformCanvasBasedSelection(shapes);
+}
+
+void Selector::PerformCanvasBasedSelection(const std::vector<Shape>& shapes)
+{
+    if (!renderer || !originalPointData || shapes.empty()) return;
     
     // 获取相机和视口信息
     vtkCamera* camera = renderer->GetActiveCamera();
@@ -746,8 +1278,8 @@ void Selector::PerformCanvasBasedSelection()
         renderer->WorldToDisplay();
         renderer->GetDisplayPoint(screenPoint);
         
-        // 使用新的区域判断方法
-        if (IsPointInCanvasShapes(screenPoint[0], screenPoint[1])) {
+        // 使用转换后的形状进行判断
+        if (IsPointInShapes(screenPoint[0], screenPoint[1], shapes)) {
             candidatePoints.push_back(i);
 
             if (occlusionDetectionEnabled) {
@@ -780,6 +1312,46 @@ void Selector::PerformCanvasBasedSelection()
     HighlightSelectedPoints(selectedPointIds);
     
     qDebug() << "遮挡检测后选中了" << visiblePoints.size() << "个点，总共选中" << selectedPointIds.size() << "个点";
+}
+
+bool Selector::IsPointInShapes(double screenX, double screenY, const std::vector<Shape>& shapes)
+{
+    for (const auto& shape : shapes) {
+        if (shape.containsPoint(screenX, screenY)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Selector::ClearAllSelectedPoints()
+{
+    if (!renderer || !originalPointData || originalColorBackup.empty()) return;
+    
+    // 获取原始点云的颜色数据
+    vtkUnsignedCharArray* originalColors = vtkUnsignedCharArray::SafeDownCast(
+        originalPointData->GetPointData()->GetScalars());
+    
+    if (!originalColors) return;
+    
+    // 恢复所有点的原始颜色
+    for (vtkIdType i = 0; i < originalColors->GetNumberOfTuples(); ++i) {
+        unsigned char* color = originalColors->GetPointer(i * 3);
+        color[0] = originalColorBackup[i * 3];
+        color[1] = originalColorBackup[i * 3 + 1];
+        color[2] = originalColorBackup[i * 3 + 2];
+    }
+    
+    // 标记颜色数据已修改
+    originalColors->Modified();
+    
+    // 清空选中点列表
+    selectedPointIds.clear();
+    
+    // 刷新渲染
+    renderer->GetRenderWindow()->Render();
+    
+    qDebug() << "已清除所有选中点";
 }
 
 void Selector::HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds)
@@ -903,10 +1475,10 @@ void Selector::PerformOcclusionAwareSelection(const std::vector<vtkIdType>& cand
         
         screenPositions[pointId] = std::make_pair(screenPoint[0], screenPoint[1]);
                 
-                // 计算到相机的距离
-                double distance = sqrt(pow(point[0] - cameraPos[0], 2) + 
-                                     pow(point[1] - cameraPos[1], 2) + 
-                                     pow(point[2] - cameraPos[2], 2));
+        // 计算到相机的距离
+        double distance = sqrt(pow(point[0] - cameraPos[0], 2) + 
+                             pow(point[1] - cameraPos[1], 2) + 
+                             pow(point[2] - cameraPos[2], 2));
         distancesToCamera[pointId] = distance;
     }
     
@@ -1003,8 +1575,8 @@ std::vector<vtkIdType> Selector::FilterOccludedPoints(const std::vector<vtkIdTyp
 }
 
 bool Selector::IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
-                                       const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
-                                       double occlusionThreshold)
+                               const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                               double occlusionThreshold)
 {
     if (frontPoints.empty()) return false;
     
@@ -1038,41 +1610,4 @@ double Selector::CalculateScreenDistance(double x1, double y1, double x2, double
 {
     // 计算屏幕距离
     return sqrt(pow(x2 - x1, 2) + pow(y2 - y1, 2));
-}
-
-// 该方法已被移除，功能由 IsPointInCanvasShapes 替代
-
-bool Selector::IsPointInPolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon)
-{
-    if (polygon.size() < 3) return false;
-    
-    // 使用射线法判断点是否在多边形内
-    bool inside = false;
-    size_t j = polygon.size() - 1;
-    
-    for (size_t i = 0; i < polygon.size(); ++i) {
-        double xi = polygon[i].first;
-        double yi = polygon[i].second;
-        double xj = polygon[j].first;
-        double yj = polygon[j].second;
-        
-        // 检查射线是否与边相交
-        if (((yi > y) != (yj > y)) && 
-            (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
-            inside = !inside;
-        }
-        j = i;
-    }
-    
-    return inside;
-}
-
-bool Selector::IsPointInCanvasShapes(double screenX, double screenY)
-{
-    for (const auto& shape : canvasShapes) {
-        if (shape.containsPoint(screenX, screenY)) {
-            return true;
-        }
-    }
-    return false;
 }
