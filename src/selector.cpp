@@ -26,6 +26,7 @@
 
 vtkStandardNewMacro(Selector);
 
+
 // Shape类的containsPoint实现
 bool Shape::containsPoint(double x, double y) const {
     switch (type) {
