@@ -20,6 +20,7 @@
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1185,8 +1186,8 @@ void Selector::DrawCircle(double centerX, double centerY, double radius)
     centerX = std::max(radius, std::min(size[0] - radius, centerX));
     centerY = std::max(radius, std::min(size[1] - radius, centerY));
     
-    // 生成圆形点集（使用足够多的点来近似圆形）
-    const int numPoints = 64;
+    // 生成圆形点集（提高细分数量获得更平滑的圆形）
+    const int numPoints = 128; // 从64提升到128
     currentShapePoints->SetNumberOfPoints(numPoints);
     
     for (int i = 0; i < numPoints; ++i) {

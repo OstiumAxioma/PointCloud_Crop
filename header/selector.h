@@ -493,6 +493,17 @@ private:
     
     // 视图锁定标志
     bool viewLocked;
+
+    // 图形融合相关的新方法
+    void PerformShapeUnion();
+    std::vector<std::pair<double, double>> ConvertShapeToPolygon(const Shape& shape, int subdivisions = 64);
+    std::vector<std::pair<double, double>> UnionPolygons(const std::vector<std::vector<std::pair<double, double>>>& polygons);
+    std::vector<std::pair<double, double>> ComputeConvexHull(const std::vector<std::pair<double, double>>& points);
+    std::vector<std::pair<double, double>> MergePolygonsByGrid(const std::vector<std::vector<std::pair<double, double>>>& polygons);
+    bool IsPointInsideAnyPolygon(double x, double y, const std::vector<std::vector<std::pair<double, double>>>& polygons);
+    std::vector<std::pair<double, double>> TraceBoundary(const std::vector<std::vector<bool>>& grid, int gridWidth, int gridHeight, double minX, double minY, double stepX, double stepY);
+    double CrossProduct(const std::pair<double, double>& O, const std::pair<double, double>& A, const std::pair<double, double>& B);
+    std::vector<std::pair<double, double>> SortBoundaryPoints(const std::vector<std::pair<double, double>>& points);
 };
 
 #endif // SELECTOR_H 
