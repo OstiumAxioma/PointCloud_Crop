@@ -477,14 +477,7 @@ Selector::Selector()
     , lastMouseX(0)
     , lastMouseY(0)
 {
-    // 初始化矢量图形显示
-    vectorShapePoints = vtkSmartPointer<vtkPoints>::New();
-    vectorShapePolyData = vtkSmartPointer<vtkPolyData>::New();
-    vectorShapePolyData->SetPoints(vectorShapePoints);
-    vectorShapeMapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
-    vectorShapeMapper->SetInputData(vectorShapePolyData);
-    vectorShapeActor = vtkSmartPointer<vtkActor2D>::New();
-    vectorShapeActor->SetMapper(vectorShapeMapper);
+    // 矢量图形显示容器初始化（每个图形将有独立的actor）
     
     // 初始化控制点显示
     controlPoints = vtkSmartPointer<vtkPoints>::New();
@@ -511,7 +504,6 @@ Selector::Selector()
     // 设置2D坐标系统为屏幕坐标
     vtkSmartPointer<vtkCoordinate> coord = vtkSmartPointer<vtkCoordinate>::New();
     coord->SetCoordinateSystem(0); // VTK_DISPLAY = 0，屏幕坐标
-    vectorShapeMapper->SetTransformCoordinate(coord);
     controlMapper->SetTransformCoordinate(coord);
     currentShapeMapper->SetTransformCoordinate(coord);
 }
@@ -524,10 +516,8 @@ void Selector::SetRenderer(vtkRenderer* ren)
 {
     renderer = ren;
     if (renderer) {
-        renderer->AddActor2D(vectorShapeActor);
         renderer->AddActor2D(controlActor);
         renderer->AddActor2D(currentShapeActor);
-        vectorShapeActor->SetVisibility(0);
         controlActor->SetVisibility(0);
         currentShapeActor->SetVisibility(0);
     }
@@ -548,10 +538,23 @@ void Selector::EnableDrawingMode(bool enable)
 
 void Selector::ClearCanvas()
 {
+    // 移除所有矢量图形的actors
+    if (renderer) {
+        for (auto& actor : vectorShapeActors) {
+            renderer->RemoveActor2D(actor);
+        }
+    }
+    
+    // 清空容器
     vectorShapes.clear();
+    vectorShapeActors.clear();
+    vectorShapeMappers.clear();
+    vectorShapePolyDatas.clear();
+    vectorShapePointsList.clear();
+    
     DeselectAllShapes();
-    vectorShapeActor->SetVisibility(0);
     controlActor->SetVisibility(0);
+    
     if (renderer) {
         renderer->GetRenderWindow()->Render();
     }
@@ -574,8 +577,20 @@ void Selector::ClearCurrentDrawing()
 
 void Selector::UpdateVectorShapeDisplay()
 {
-    if (!renderer || vectorShapes.empty()) {
-        vectorShapeActor->SetVisibility(0);
+    if (!renderer) return;
+    
+    // 先移除旧的actors
+    for (auto& actor : vectorShapeActors) {
+        renderer->RemoveActor2D(actor);
+    }
+    
+    // 清空旧的显示容器
+    vectorShapeActors.clear();
+    vectorShapeMappers.clear();
+    vectorShapePolyDatas.clear();
+    vectorShapePointsList.clear();
+    
+    if (vectorShapes.empty()) {
         controlActor->SetVisibility(0);
         if (renderer) {
             renderer->GetRenderWindow()->Render();
@@ -583,74 +598,38 @@ void Selector::UpdateVectorShapeDisplay()
         return;
     }
     
-    // 计算所有形状所需的总点数
-    size_t totalPoints = 0;
-    for (const auto& shape : vectorShapes) {
-        switch (shape->getType()) {
-            case SelectionShape::Rectangle:
-                totalPoints += 4;
-                break;
-            case SelectionShape::Circle:
-                totalPoints += 64;
-                break;
-            case SelectionShape::Polygon: {
-                auto* polygon = static_cast<VectorPolygon*>(shape.get());
-                totalPoints += polygon->toShape().polygon.vertices.size();
-                break;
-            }
-        }
+    // 为每个形状创建独立的actor
+    for (size_t i = 0; i < vectorShapes.size(); ++i) {
+        auto& shape = vectorShapes[i];
+        
+        // 创建独立的VTK对象
+        auto points = vtkSmartPointer<vtkPoints>::New();
+        auto polyData = vtkSmartPointer<vtkPolyData>::New();
+        auto mapper = vtkSmartPointer<vtkPolyDataMapper2D>::New();
+        auto actor = vtkSmartPointer<vtkActor2D>::New();
+        
+        polyData->SetPoints(points);
+        mapper->SetInputData(polyData);
+        actor->SetMapper(mapper);
+        
+        // 设置2D坐标系统
+        vtkSmartPointer<vtkCoordinate> coord = vtkSmartPointer<vtkCoordinate>::New();
+        coord->SetCoordinateSystem(0); // VTK_DISPLAY = 0，屏幕坐标
+        mapper->SetTransformCoordinate(coord);
+        
+        // 绘制形状
+        shape->draw(renderer, actor, mapper, polyData, points);
+        
+        // 添加到渲染器
+        renderer->AddActor2D(actor);
+        actor->SetVisibility(1);
+        
+        // 保存到容器
+        vectorShapeActors.push_back(actor);
+        vectorShapeMappers.push_back(mapper);
+        vectorShapePolyDatas.push_back(polyData);
+        vectorShapePointsList.push_back(points);
     }
-    
-    if (totalPoints == 0) {
-        vectorShapeActor->SetVisibility(0);
-        controlActor->SetVisibility(0);
-        if (renderer) {
-            renderer->GetRenderWindow()->Render();
-        }
-        return;
-    }
-    
-    // 绘制所有矢量形状
-    vectorShapePoints->SetNumberOfPoints(totalPoints);
-    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
-    
-    size_t pointIndex = 0;
-    for (const auto& shape : vectorShapes) {
-        // 每个形状单独绘制，以便设置不同的颜色
-        vtkSmartPointer<vtkPoints> shapePoints = vtkSmartPointer<vtkPoints>::New();
-        vtkSmartPointer<vtkPolyData> shapePolyData = vtkSmartPointer<vtkPolyData>::New();
-        shapePolyData->SetPoints(shapePoints);
-        
-        shape->draw(renderer, vectorShapeActor, vectorShapeMapper, shapePolyData, shapePoints);
-        
-        // 复制点到主要的点集
-        for (vtkIdType i = 0; i < shapePoints->GetNumberOfPoints(); ++i) {
-            double point[3];
-            shapePoints->GetPoint(i, point);
-            vectorShapePoints->SetPoint(pointIndex + i, point);
-        }
-        
-        // 复制线到主要的线集
-        vtkCellArray* shapeLines = shapePolyData->GetLines();
-        if (shapeLines) {
-            shapeLines->InitTraversal();
-            vtkSmartPointer<vtkIdList> idList = vtkSmartPointer<vtkIdList>::New();
-            while (shapeLines->GetNextCell(idList)) {
-                vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-                for (vtkIdType i = 0; i < idList->GetNumberOfIds(); ++i) {
-                    line->GetPointIds()->SetId(i, pointIndex + idList->GetId(i));
-                }
-                lines->InsertNextCell(line);
-            }
-        }
-        
-        pointIndex += shapePoints->GetNumberOfPoints();
-    }
-    
-    vectorShapePolyData->SetLines(lines);
-    vectorShapePoints->Modified();
-    vectorShapePolyData->Modified();
-    vectorShapeActor->SetVisibility(1);
     
     // 绘制控制点
     DrawControlPoints();
@@ -731,6 +710,11 @@ VectorShape* Selector::GetShapeAtPosition(double x, double y)
 
 void Selector::SelectShape(VectorShape* shape)
 {
+    // 如果点击的是已选中的图形，不需要重新选择
+    if (selectedShape == shape) {
+        return;
+    }
+    
     DeselectAllShapes();
     if (shape) {
         selectedShape = shape;
@@ -745,10 +729,14 @@ void Selector::SelectShape(VectorShape* shape)
 
 void Selector::DeselectAllShapes()
 {
-    selectedShape = nullptr;
-    for (auto& shape : vectorShapes) {
-        shape->setSelected(false);
+    if (selectedShape) {
+        selectedShape->setSelected(false);
+        selectedShape = nullptr;
+        
+        // 更新显示以反映选择状态的变化
+        UpdateVectorShapeDisplay();
     }
+    
     controlActor->SetVisibility(0);
     
     if (cursorCallback) {

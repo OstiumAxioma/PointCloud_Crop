@@ -334,11 +334,11 @@ private:
     vtkSmartPointer<vtkRenderer> renderer;
     vtkSmartPointer<vtkPolyData> originalPointData;
     
-    // 矢量图形显示相关
-    vtkSmartPointer<vtkPoints> vectorShapePoints;
-    vtkSmartPointer<vtkPolyData> vectorShapePolyData;
-    vtkSmartPointer<vtkActor2D> vectorShapeActor;
-    vtkSmartPointer<vtkPolyDataMapper2D> vectorShapeMapper;
+    // 矢量图形显示相关（每个图形独立的actor）
+    std::vector<vtkSmartPointer<vtkActor2D>> vectorShapeActors;
+    std::vector<vtkSmartPointer<vtkPolyDataMapper2D>> vectorShapeMappers;
+    std::vector<vtkSmartPointer<vtkPolyData>> vectorShapePolyDatas;
+    std::vector<vtkSmartPointer<vtkPoints>> vectorShapePointsList;
     
     // 控制点显示相关
     vtkSmartPointer<vtkPoints> controlPoints;
