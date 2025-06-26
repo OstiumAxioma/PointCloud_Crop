@@ -84,6 +84,7 @@ public:
 private:
     Selector* selector_;
     std::unique_ptr<VectorShape> shape_;
+    VectorShape* originalShapePtr_; // 保存原始形状指针用于删除
     size_t originalIndex_;
     bool executed_;
 };

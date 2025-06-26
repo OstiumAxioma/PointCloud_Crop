@@ -1433,10 +1433,10 @@ std::string AddShapeCommand::getDescription() const {
 
 // DeleteShapeCommand 实现
 DeleteShapeCommand::DeleteShapeCommand(Selector* selector, VectorShape* shape)
-    : selector_(selector), executed_(false) {
+    : selector_(selector), originalShapePtr_(shape), executed_(false) {
     originalIndex_ = selector_->GetShapeIndex(shape);
     
-    // 创建形状的副本
+    // 创建形状的副本用于撤销时恢复
     switch (shape->getType()) {
         case SelectionShape::Rectangle: {
             auto* rect = static_cast<VectorRectangle*>(shape);
@@ -1463,8 +1463,8 @@ DeleteShapeCommand::DeleteShapeCommand(Selector* selector, VectorShape* shape)
 
 void DeleteShapeCommand::execute() {
     if (!executed_) {
-        // 移除图形但不需要保存返回值，因为我们已经有副本了
-        selector_->RemoveShapeInternal(shape_.get());
+        // 使用原始形状指针来删除图形
+        selector_->RemoveShapeInternal(originalShapePtr_);
         executed_ = true;
     }
 }
