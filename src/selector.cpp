@@ -16,6 +16,8 @@
 #include <vtkPointData.h>
 #include <vtkLookupTable.h>
 #include <vtkMath.h>
+#include <vtkRenderWindow.h>
+#include <vtkProperty2D.h>
 #include <QDebug>
 #include <algorithm>
 #include <cmath>
@@ -120,6 +122,26 @@ void Selector::SetRenderer(vtkRenderer* ren)
         renderer->AddActor2D(canvasActor);
         currentShapeActor->SetVisibility(0); // 初始隐藏
         canvasActor->SetVisibility(0); // 初始隐藏
+        
+        // 优化渲染质量设置
+        vtkRenderWindow* renderWindow = renderer->GetRenderWindow();
+        if (renderWindow) {
+            // 启用多重采样抗锯齿
+            renderWindow->SetMultiSamples(8); // 8x MSAA
+            
+            // 启用线条平滑
+            renderWindow->LineSmoothingOn();
+            
+            // 设置高质量渲染
+            renderWindow->SetDesiredUpdateRate(30.0); // 30 FPS
+        }
+        
+        // 优化2D绘制质量
+        currentShapeActor->GetProperty()->SetLineWidth(2.0);
+        currentShapeActor->GetProperty()->SetOpacity(0.9);
+        
+        canvasActor->GetProperty()->SetLineWidth(3.0);
+        canvasActor->GetProperty()->SetOpacity(1.0);
     }
 }
 
@@ -404,8 +426,8 @@ void Selector::DrawCircle(double centerX, double centerY, double radius)
     centerX = std::max(radius, std::min(size[0] - radius, centerX));
     centerY = std::max(radius, std::min(size[1] - radius, centerY));
     
-    // 生成圆形点集（使用足够多的点来近似圆形）
-    const int numPoints = 64;
+    // 生成圆形点集（提高细分数量获得更平滑的圆形）
+    const int numPoints = 128; // 从64提升到128
     currentShapePoints->SetNumberOfPoints(numPoints);
     
     for (int i = 0; i < numPoints; ++i) {
@@ -570,7 +592,7 @@ void Selector::DrawCanvasShapes()
                 totalPoints += 4;
                 break;
             case SelectionShape::Circle:
-                totalPoints += 64;
+                totalPoints += 128;
                 break;
             case SelectionShape::Polygon:
                 totalPoints += shape.polygon.vertices.size();
@@ -619,7 +641,7 @@ void Selector::DrawCanvasShapes()
             }
             case SelectionShape::Circle: {
                 // 绘制圆形
-                const int numPoints = 64;
+                const int numPoints = 128; // 从64提升到128
                 for (int i = 0; i < numPoints; ++i) {
                     double angle = 2.0 * M_PI * i / numPoints;
                     double x = shape.circle.centerX + shape.circle.radius * cos(angle);
@@ -672,11 +694,16 @@ void Selector::DrawCanvasShapes()
     canvasPoints->Modified();
     canvasPolyData->Modified();
     
-    // 设置画布颜色为更明显的绿色，并增加线宽
+    // 设置画布颜色为更明显的绿色，并优化渲染质量
     canvasActor->GetProperty()->SetColor(0.0, 1.0, 0.2); // 明亮的绿色
     canvasActor->GetProperty()->SetLineWidth(3.0); // 增加线宽使其更明显
+    canvasActor->GetProperty()->SetOpacity(1.0); // 完全不透明
     canvasActor->SetVisibility(1);
-    renderer->GetRenderWindow()->Render();
+    
+    // 启用高质量渲染
+    if (renderer && renderer->GetRenderWindow()) {
+        renderer->GetRenderWindow()->Render();
+    }
 }
 
 void Selector::ConfirmSelection()
@@ -1139,8 +1166,10 @@ std::vector<std::pair<double, double>> Selector::ConvertShapeToPolygon(const Sha
             break;
         }
         case SelectionShape::Circle: {
-            for (int i = 0; i < subdivisions; ++i) {
-                double angle = 2.0 * M_PI * i / subdivisions;
+            // 提高圆形细分数量以获得更平滑的显示效果
+            int circleSubdivisions = 128; // 从64提升到128
+            for (int i = 0; i < circleSubdivisions; ++i) {
+                double angle = 2.0 * M_PI * i / circleSubdivisions;
                 double x = shape.circle.centerX + shape.circle.radius * cos(angle);
                 double y = shape.circle.centerY + shape.circle.radius * sin(angle);
                 polygon.emplace_back(x, y);
@@ -1198,8 +1227,17 @@ std::vector<std::pair<double, double>> Selector::MergePolygonsByGrid(const std::
     minY -= margin;
     maxY += margin;
     
-    // 创建网格
-    int gridResolution = 200; // 网格分辨率，可以调整
+    // 自适应网格分辨率，根据形状大小调整
+    double areaSize = (maxX - minX) * (maxY - minY);
+    int gridResolution;
+    if (areaSize > 1000000) { // 大形状
+        gridResolution = 1200;
+    } else if (areaSize > 100000) { // 中等形状
+        gridResolution = 1000;
+    } else { // 小形状
+        gridResolution = 800;
+    }
+    
     double stepX = (maxX - minX) / gridResolution;
     double stepY = (maxY - minY) / gridResolution;
     
