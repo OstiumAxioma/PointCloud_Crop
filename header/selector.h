@@ -48,6 +48,12 @@ enum class EditOperation {
 // 前向声明
 class VectorShape;
 class Selector;
+class PointCloudSelector;
+class SelectionState;
+
+//=============================================================================
+// 命令模式 - 统一的状态变更命令
+//=============================================================================
 
 // 命令基类
 class Command {
@@ -56,6 +62,21 @@ public:
     virtual void execute() = 0;
     virtual void undo() = 0;
     virtual std::string getDescription() const = 0;
+};
+
+// 统一的状态变更命令（替代原有的MoveShapeCommand和EditShapeCommand）
+class StateChangeCommand : public Command {
+public:
+    StateChangeCommand(VectorShape* shape, const std::string& beforeState, const std::string& afterState, const std::string& description = "状态变更");
+    void execute() override;
+    void undo() override;
+    std::string getDescription() const override;
+
+private:
+    VectorShape* shape_;
+    std::string beforeState_;
+    std::string afterState_;
+    std::string description_;
 };
 
 // 添加图形命令
@@ -89,112 +110,11 @@ private:
     bool executed_;
 };
 
-// 移动图形命令
-class MoveShapeCommand : public Command {
-public:
-    MoveShapeCommand(VectorShape* shape, double fromX, double fromY, double toX, double toY);
-    void execute() override;
-    void undo() override;
-    std::string getDescription() const override;
+//=============================================================================
+// 形状类层次结构 - 移除Shape类冗余
+//=============================================================================
 
-private:
-    VectorShape* shape_;
-    double fromX_, fromY_, toX_, toY_;
-};
-
-// 编辑图形命令（包括顶点移动、缩放等）
-class EditShapeCommand : public Command {
-public:
-    EditShapeCommand(VectorShape* shape, const std::string& beforeState, const std::string& afterState);
-    void execute() override;
-    void undo() override;
-    std::string getDescription() const override;
-
-private:
-    VectorShape* shape_;
-    std::string beforeState_;
-    std::string afterState_;
-};
-
-// 形状数据结构（保持原有结构用于最终选取）
-struct Shape {
-    SelectionShape type;
-    
-    // 矩形参数：左上角和右下角
-    struct Rectangle {
-        double x1, y1, x2, y2;
-    };
-    
-    // 圆形参数：中心点和半径
-    struct Circle {
-        double centerX, centerY, radius;
-    };
-    
-    // 多边形参数：顶点列表
-    struct Polygon {
-        std::vector<std::pair<double, double>> vertices;
-    };
-    
-    union {
-        Rectangle rect;
-        Circle circle;
-        Polygon polygon;
-    };
-    
-    Shape(SelectionShape t) : type(t) {
-        if (type == SelectionShape::Polygon) {
-            new(&polygon) Polygon();
-        }
-    }
-    
-    ~Shape() {
-        if (type == SelectionShape::Polygon) {
-            polygon.~Polygon();
-        }
-    }
-    
-    // 拷贝构造函数
-    Shape(const Shape& other) : type(other.type) {
-        switch (type) {
-            case SelectionShape::Rectangle:
-                rect = other.rect;
-                break;
-            case SelectionShape::Circle:
-                circle = other.circle;
-                break;
-            case SelectionShape::Polygon:
-                new(&polygon) Polygon(other.polygon);
-                break;
-        }
-    }
-    
-    // 赋值运算符
-    Shape& operator=(const Shape& other) {
-        if (this != &other) {
-            if (type == SelectionShape::Polygon) {
-                polygon.~Polygon();
-            }
-            type = other.type;
-            switch (type) {
-                case SelectionShape::Rectangle:
-                    rect = other.rect;
-                    break;
-                case SelectionShape::Circle:
-                    circle = other.circle;
-                    break;
-                case SelectionShape::Polygon:
-                    new(&polygon) Polygon(other.polygon);
-                    break;
-            }
-        }
-        return *this;
-    }
-    
-    // 判断点是否在形状内
-    bool containsPoint(double x, double y) const;
-};
-
-// 矢量图形基类
+// 矢量图形基类 - 现在包含所有必要功能，不再需要Shape类
 class VectorShape {
 public:
     virtual ~VectorShape() = default;
@@ -204,6 +124,9 @@ public:
     
     // 碰撞检测
     virtual bool hitTest(double x, double y, double tolerance = 8.0) const = 0;
+    
+    // 直接的点包含检测（替代原有的Shape::containsPoint）
+    virtual bool containsPoint(double x, double y) const = 0;
     
     // 控制点碰撞检测
     virtual bool hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance = 8.0) const = 0;
@@ -216,19 +139,36 @@ public:
     // 移动控制点
     virtual void moveControlPoint(int index, double x, double y) = 0;
     
-    // 转换为原有的Shape格式（用于选取）
-    virtual Shape toShape() const = 0;
-    
-    // 选择状态
-    virtual void setSelected(bool selected) { isSelected_ = selected; }
-    virtual bool isSelected() const { return isSelected_; }
-    
     // 获取形状类型
     virtual SelectionShape getType() const = 0;
     
     // 序列化状态（用于撤销功能）
     virtual std::string serialize() const = 0;
     virtual void deserialize(const std::string& data) = 0;
+    
+    // 选择状态
+    virtual void setSelected(bool selected) { isSelected_ = selected; }
+    virtual bool isSelected() const { return isSelected_; }
+    
+    // 为了向后兼容保留的Shape结构体
+    struct ShapeData {
+        SelectionShape type;
+        union {
+            struct { double x1, y1, x2, y2; } rect;
+            struct { double centerX, centerY, radius; } circle;
+            struct { std::vector<std::pair<double, double>>* vertices; } polygon;
+        };
+        std::vector<std::pair<double, double>> polygonVertices; // 用于多边形顶点存储
+        
+        ShapeData(SelectionShape t) : type(t) {
+            if (type == SelectionShape::Polygon) {
+                polygon.vertices = &polygonVertices;
+            }
+        }
+    };
+    
+    // 转换为兼容格式（保持向后兼容）
+    virtual ShapeData toShapeData() const = 0;
     
 protected:
     bool isSelected_ = false;
@@ -241,13 +181,14 @@ public:
     
     void draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, vtkPolyData* polyData, vtkPoints* points) override;
     bool hitTest(double x, double y, double tolerance = 8.0) const override;
+    bool containsPoint(double x, double y) const override;
     bool hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance = 8.0) const override;
     void startDrag(double x, double y) override;
     void updateDrag(double x, double y, bool shiftPressed = false) override;
     void endDrag() override;
     void moveControlPoint(int index, double x, double y) override;
-    Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Rectangle; }
+    ShapeData toShapeData() const override;
     
     std::string serialize() const override;
     void deserialize(const std::string& data) override;
@@ -268,13 +209,14 @@ public:
     
     void draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, vtkPolyData* polyData, vtkPoints* points) override;
     bool hitTest(double x, double y, double tolerance = 8.0) const override;
+    bool containsPoint(double x, double y) const override;
     bool hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance = 8.0) const override;
     void startDrag(double x, double y) override;
     void updateDrag(double x, double y, bool shiftPressed = false) override;
     void endDrag() override;
     void moveControlPoint(int index, double x, double y) override;
-    Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Circle; }
+    ShapeData toShapeData() const override;
     
     std::string serialize() const override;
     void deserialize(const std::string& data) override;
@@ -294,13 +236,14 @@ public:
     
     void draw(vtkRenderer* renderer, vtkActor2D* actor, vtkPolyDataMapper2D* mapper, vtkPolyData* polyData, vtkPoints* points) override;
     bool hitTest(double x, double y, double tolerance = 8.0) const override;
+    bool containsPoint(double x, double y) const override;
     bool hitTestControlPoint(double x, double y, int& controlPointIndex, double tolerance = 8.0) const override;
     void startDrag(double x, double y) override;
     void updateDrag(double x, double y, bool shiftPressed = false) override;
     void endDrag() override;
     void moveControlPoint(int index, double x, double y) override;
-    Shape toShape() const override;
     SelectionShape getType() const override { return SelectionShape::Polygon; }
+    ShapeData toShapeData() const override;
     
     std::string serialize() const override;
     void deserialize(const std::string& data) override;
@@ -313,6 +256,104 @@ private:
     bool isPointInPolygon(double x, double y) const; // 判断点是否在多边形内
 };
 
+//=============================================================================
+// 点云选择模块 - 模块化选择逻辑
+//=============================================================================
+
+class PointCloudSelector {
+public:
+    PointCloudSelector(vtkRenderer* renderer, vtkPolyData* pointData);
+    ~PointCloudSelector() = default;
+    
+    // 设置数据
+    void setRenderer(vtkRenderer* renderer) { renderer_ = renderer; }
+    void setPointCloudData(vtkPolyData* pointData) { originalPointData_ = pointData; }
+    void setOcclusionDetectionEnabled(bool enabled) { occlusionDetectionEnabled_ = enabled; }
+    
+    // 主要选择方法
+    std::vector<vtkIdType> selectPointsByShapes(const std::vector<VectorShape*>& shapes);
+    void highlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds);
+    void clearAllSelectedPoints();
+    
+    // 获取当前选中的点
+    const std::vector<vtkIdType>& getSelectedPoints() const { return selectedPointIds_; }
+    void addSelectedPoints(const std::vector<vtkIdType>& points);
+    
+private:
+    // 核心选择算法
+    std::vector<vtkIdType> collectCandidatePoints(const std::vector<VectorShape*>& shapes);
+    std::vector<vtkIdType> filterOccludedPoints(const std::vector<vtkIdType>& candidatePoints,
+                                               const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                                               const std::map<vtkIdType, double>& distancesToCamera);
+    
+    // 辅助方法
+    bool isPointInShapes(double screenX, double screenY, const std::vector<VectorShape*>& shapes);
+    double calculateScreenDistance(double x1, double y1, double x2, double y2);
+    bool isPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
+                        const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
+                        double occlusionThreshold = 5.0);
+    
+    // 成员变量
+    vtkRenderer* renderer_;
+    vtkPolyData* originalPointData_;
+    bool occlusionDetectionEnabled_;
+    std::vector<vtkIdType> selectedPointIds_;
+    std::vector<unsigned char> originalColorBackup_;
+};
+
+//=============================================================================
+// 状态模式 - 改进状态管理
+//=============================================================================
+
+// 选择状态基类
+class SelectionState {
+public:
+    virtual ~SelectionState() = default;
+    virtual void handleMouseDown(Selector* selector, int x, int y) = 0;
+    virtual void handleMouseMove(Selector* selector, int x, int y) = 0;
+    virtual void handleMouseUp(Selector* selector) = 0;
+    virtual void handleRightClick(Selector* selector) = 0;
+    virtual void handleKeyPress(Selector* selector, const std::string& key, bool ctrlPressed) = 0;
+    virtual std::string getStateName() const = 0;
+};
+
+// 绘制状态
+class DrawingState : public SelectionState {
+public:
+    void handleMouseDown(Selector* selector, int x, int y) override;
+    void handleMouseMove(Selector* selector, int x, int y) override;
+    void handleMouseUp(Selector* selector) override;
+    void handleRightClick(Selector* selector) override;
+    void handleKeyPress(Selector* selector, const std::string& key, bool ctrlPressed) override;
+    std::string getStateName() const override { return "Drawing"; }
+};
+
+// 编辑状态
+class EditingState : public SelectionState {
+public:
+    void handleMouseDown(Selector* selector, int x, int y) override;
+    void handleMouseMove(Selector* selector, int x, int y) override;
+    void handleMouseUp(Selector* selector) override;
+    void handleRightClick(Selector* selector) override;
+    void handleKeyPress(Selector* selector, const std::string& key, bool ctrlPressed) override;
+    std::string getStateName() const override { return "Editing"; }
+};
+
+// 多边形绘制状态
+class PolygonDrawingState : public SelectionState {
+public:
+    void handleMouseDown(Selector* selector, int x, int y) override;
+    void handleMouseMove(Selector* selector, int x, int y) override;
+    void handleMouseUp(Selector* selector) override;
+    void handleRightClick(Selector* selector) override;
+    void handleKeyPress(Selector* selector, const std::string& key, bool ctrlPressed) override;
+    std::string getStateName() const override { return "PolygonDrawing"; }
+};
+
+//=============================================================================
+// 主要的Selector类 - 重构后的版本
+//=============================================================================
+
 class Selector : public vtkInteractorStyleTrackballCamera
 {
 public:
@@ -323,47 +364,41 @@ public:
     void SetRenderer(vtkRenderer* renderer);
     void SetPointCloudData(vtkPolyData* pointData);
     
-    // 启用/禁用绘制模式
+    // 模式控制
     void EnableDrawingMode(bool enable);
-    bool IsDrawingModeEnabled() const { return drawingModeEnabled; }
-
-    // 启用/禁用遮挡检测
-    void EnableOcclusionDetection(bool enable) { occlusionDetectionEnabled = enable; }
-    bool IsOcclusionDetectionEnabled() const { return occlusionDetectionEnabled; }
+    bool IsDrawingModeEnabled() const;
     
-    // 启用/禁用视图锁定（禁用相机操作）
-    void EnableViewLock(bool enable) { viewLocked = enable; }
-    bool IsViewLocked() const { return viewLocked; }
+    void EnableOcclusionDetection(bool enable);
+    bool IsOcclusionDetectionEnabled() const;
+    
+    void EnableViewLock(bool enable) { viewLocked_ = enable; }
+    bool IsViewLocked() const { return viewLocked_; }
 
-    // 设置当前绘制的形状类型
-    void SetCurrentDrawingShape(SelectionShape shape) { currentDrawingShape = shape; }
-    SelectionShape GetCurrentDrawingShape() const { return currentDrawingShape; }
+    // 绘制形状控制
+    void SetCurrentDrawingShape(SelectionShape shape);
+    SelectionShape GetCurrentDrawingShape() const { return currentDrawingShape_; }
 
     // 画布操作
-    void ClearCanvas(); // 清空所有已绘制的形状
-    void ConfirmSelection(); // 根据画布上的形状进行选取
-    size_t GetCanvasShapeCount() const { return vectorShapes.size(); }
+    void ClearCanvas();
+    void ConfirmSelection();
+    size_t GetCanvasShapeCount() const { return vectorShapes_.size(); }
     
-    // 清除所有选中的点
+    // 选择操作
     void ClearAllSelectedPoints();
-    
-    // 清除当前正在绘制的形状
     void ClearCurrentDrawing();
+    size_t GetSelectedPointCount() const;
     
-    // 获取当前选中的点数量
-    size_t GetSelectedPointCount() const { return selectedPointIds.size(); }
-    
-    // 设置光标回调函数
+    // 光标控制
     void SetCursorCallback(std::function<void(Qt::CursorShape)> callback) {
-        cursorCallback = callback;
+        cursorCallback_ = callback;
     }
     
     // 撤销系统
     void ExecuteCommand(std::unique_ptr<Command> command);
     void Undo();
-    bool CanUndo() const { return !commandHistory.empty(); }
+    bool CanUndo() const { return !commandHistory_.empty(); }
     
-    // 删除选中的图形
+    // 图形编辑
     void DeleteSelectedShape();
     
     // 内部方法（供命令类调用）
@@ -371,139 +406,115 @@ public:
     std::unique_ptr<VectorShape> RemoveShapeInternal(VectorShape* shape);
     void InsertShapeInternal(std::unique_ptr<VectorShape> shape, size_t index);
     size_t GetShapeIndex(VectorShape* shape) const;
-
-protected:
-    Selector();
-    ~Selector();
-
-    // 鼠标事件处理
-    virtual void OnLeftButtonDown() override;
-    virtual void OnLeftButtonUp() override;
-    virtual void OnRightButtonDown() override;
-    virtual void OnMouseMove() override;
     
-    // 键盘事件处理
-    virtual void OnKeyPress() override;
-
-private:
-    // 矢量图形编辑相关方法
+    // 状态管理
+    void SetState(std::unique_ptr<SelectionState> state);
+    SelectionState* GetCurrentState() const { return currentState_.get(); }
+    
+    // 绘制方法（状态类需要访问）
+    void DrawCurrentShape();
+    void DrawRectangle(double x1, double y1, double x2, double y2);
+    void DrawCircle(double centerX, double centerY, double radius);
+    void DrawPolygon(const std::vector<std::pair<double, double>>& vertices, bool addTemporaryVertex = true);
+    void AddPolygonVertex(int x, int y);
+    void UndoLastVertex();
+    void CompleteCurrentPolygon();
+    
+    // 图形管理
     void UpdateVectorShapeDisplay();
     void DrawControlPoints();
     VectorShape* GetShapeAtPosition(double x, double y);
     void SelectShape(VectorShape* shape);
     void DeselectAllShapes();
     
-    // 绘制当前正在编辑的形状（绘制模式）
-    void DrawCurrentShape();
-    void ClearCurrentShapeDisplay();
-    
-    // 绘制矩形（绘制模式）
-    void DrawRectangle(double x1, double y1, double x2, double y2);
-    
-    // 绘制圆形（绘制模式）
-    void DrawCircle(double centerX, double centerY, double radius);
-    
-    // 绘制多边形（绘制模式）
-    void DrawPolygon(const std::vector<std::pair<double, double>>& vertices, bool addTemporaryVertex = true);
-    void AddPolygonVertex(int x, int y);
-    void UndoLastVertex();
-    void CompleteCurrentPolygon();
-    
-    // 执行点云选择（基于画布上的所有形状）
-    void PerformCanvasBasedSelection();
-    void PerformCanvasBasedSelection(const std::vector<Shape>& shapes);
-    
-    // 高亮选中的点
-    void HighlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds);
+    // 访问内部状态（供状态类使用）
+    bool& IsDrawing() { return isDrawing_; }
+    int& StartX() { return startX_; }
+    int& StartY() { return startY_; }
+    int& CurrentX() { return currentX_; }
+    int& CurrentY() { return currentY_; }
+    std::vector<std::pair<int, int>>& CurrentPolygonVertices() { return currentPolygonVertices_; }
+    VectorShape*& SelectedShape() { return selectedShape_; }
+    EditOperation& CurrentOperation() { return currentOperation_; }
+    int& SelectedControlPoint() { return selectedControlPoint_; }
+    bool& IsDragging() { return isDragging_; }
+    double& LastMouseX() { return lastMouseX_; }
+    double& LastMouseY() { return lastMouseY_; }
+    std::string& ShapeStateBeforeDrag() { return shapeStateBeforeDrag_; }
+    vtkSmartPointer<vtkActor2D>& CurrentShapeActor() { return currentShapeActor_; }
 
-    // 遮挡检测相关方法
-    void PerformOcclusionAwareSelection(const std::vector<vtkIdType>& candidatePoints);
-    std::vector<vtkIdType> FilterOccludedPoints(const std::vector<vtkIdType>& candidatePoints,
-                                                    const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
-                                                    const std::map<vtkIdType, double>& distancesToCamera);
-    double CalculateScreenDistance(double x1, double y1, double x2, double y2);
-    bool IsPointOccluded(vtkIdType pointId, const std::vector<vtkIdType>& frontPoints, 
-                        const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
-                        double occlusionThreshold = 5.0);
-    
-    // 判断点是否在形状内（用于选取）
-    bool IsPointInShapes(double screenX, double screenY, const std::vector<Shape>& shapes);
+protected:
+    Selector();
+    ~Selector();
 
-    // 成员变量
-    vtkSmartPointer<vtkRenderer> renderer;
-    vtkSmartPointer<vtkPolyData> originalPointData;
+    // VTK事件处理（委托给状态）
+    virtual void OnLeftButtonDown() override;
+    virtual void OnLeftButtonUp() override;
+    virtual void OnRightButtonDown() override;
+    virtual void OnMouseMove() override;
+    virtual void OnKeyPress() override;
+
+private:
+    // 核心组件
+    vtkSmartPointer<vtkRenderer> renderer_;
+    std::unique_ptr<PointCloudSelector> pointCloudSelector_;
+    std::unique_ptr<SelectionState> currentState_;
     
-    // 矢量图形显示相关（每个图形独立的actor）
-    std::vector<vtkSmartPointer<vtkActor2D>> vectorShapeActors;
-    std::vector<vtkSmartPointer<vtkPolyDataMapper2D>> vectorShapeMappers;
-    std::vector<vtkSmartPointer<vtkPolyData>> vectorShapePolyDatas;
-    std::vector<vtkSmartPointer<vtkPoints>> vectorShapePointsList;
+    // 图形存储
+    std::vector<std::unique_ptr<VectorShape>> vectorShapes_;
     
-    // 控制点显示相关
-    vtkSmartPointer<vtkPoints> controlPoints;
-    vtkSmartPointer<vtkPolyData> controlPolyData;
-    vtkSmartPointer<vtkActor2D> controlActor;
-    vtkSmartPointer<vtkPolyDataMapper2D> controlMapper;
+    // VTK显示组件
+    std::vector<vtkSmartPointer<vtkActor2D>> vectorShapeActors_;
+    std::vector<vtkSmartPointer<vtkPolyDataMapper2D>> vectorShapeMappers_;
+    std::vector<vtkSmartPointer<vtkPolyData>> vectorShapePolyDatas_;
+    std::vector<vtkSmartPointer<vtkPoints>> vectorShapePointsList_;
     
-    // 当前正在绘制的形状显示（绘制模式）
-    vtkSmartPointer<vtkPoints> currentShapePoints;
-    vtkSmartPointer<vtkPolyData> currentShapePolyData;
-    vtkSmartPointer<vtkActor2D> currentShapeActor;
-    vtkSmartPointer<vtkPolyDataMapper2D> currentShapeMapper;
+    // 控制点显示
+    vtkSmartPointer<vtkPoints> controlPoints_;
+    vtkSmartPointer<vtkPolyData> controlPolyData_;
+    vtkSmartPointer<vtkActor2D> controlActor_;
+    vtkSmartPointer<vtkPolyDataMapper2D> controlMapper_;
     
-    bool drawingModeEnabled;
-    bool isDrawing;
-    int startX, startY;
-    int currentX, currentY;
+    // 当前绘制形状显示
+    vtkSmartPointer<vtkPoints> currentShapePoints_;
+    vtkSmartPointer<vtkPolyData> currentShapePolyData_;
+    vtkSmartPointer<vtkActor2D> currentShapeActor_;
+    vtkSmartPointer<vtkPolyDataMapper2D> currentShapeMapper_;
     
-    // 当前绘制的形状类型
-    SelectionShape currentDrawingShape;
-    
-    // 多边形绘制状态
-    bool isDrawingPolygon;
-    std::vector<std::pair<int, int>> currentPolygonVertices;
-    
-    // 矢量图形存储
-    std::vector<std::unique_ptr<VectorShape>> vectorShapes;
+    // 状态变量（现在由状态类管理）
+    SelectionShape currentDrawingShape_;
+    bool isDrawing_;
+    int startX_, startY_;
+    int currentX_, currentY_;
+    std::vector<std::pair<int, int>> currentPolygonVertices_;
     
     // 编辑状态
-    VectorShape* selectedShape;
-    EditOperation currentOperation;
-    int selectedControlPoint;
-    bool isDragging;
-    double lastMouseX, lastMouseY;
+    VectorShape* selectedShape_;
+    EditOperation currentOperation_;
+    int selectedControlPoint_;
+    bool isDragging_;
+    double lastMouseX_, lastMouseY_;
+    std::string shapeStateBeforeDrag_;
+    
+    // 系统状态
+    bool viewLocked_;
+    std::function<void(Qt::CursorShape)> cursorCallback_;
     
     // 撤销系统
-    std::stack<std::unique_ptr<Command>> commandHistory;
+    std::stack<std::unique_ptr<Command>> commandHistory_;
     static const size_t MAX_HISTORY_SIZE = 50;
     
-    // 拖拽前的状态（用于撤销）
-    std::string shapeStateBeforeDrag;
-
-    std::function<void(Qt::CursorShape)> cursorCallback;
+    // 默认状态实例
+    std::unique_ptr<DrawingState> drawingState_;
+    std::unique_ptr<EditingState> editingState_;
+    std::unique_ptr<PolygonDrawingState> polygonDrawingState_;
     
-    // 选中的点ID列表
-    std::vector<vtkIdType> selectedPointIds;
+    // 清理方法
+    void ClearCurrentShapeDisplay();
     
-    // 原始颜色备份
-    std::vector<unsigned char> originalColorBackup;
-
-    // 遮挡检测标志
-    bool occlusionDetectionEnabled;
-    
-    // 视图锁定标志
-    bool viewLocked;
-
-    // 图形融合相关的新方法
-    void PerformShapeUnion();
-    std::vector<std::pair<double, double>> ConvertShapeToPolygon(const Shape& shape, int subdivisions = 64);
-    std::vector<std::pair<double, double>> UnionPolygons(const std::vector<std::vector<std::pair<double, double>>>& polygons);
-    std::vector<std::pair<double, double>> ComputeConvexHull(const std::vector<std::pair<double, double>>& points);
-    std::vector<std::pair<double, double>> MergePolygonsByGrid(const std::vector<std::vector<std::pair<double, double>>>& polygons);
-    bool IsPointInsideAnyPolygon(double x, double y, const std::vector<std::vector<std::pair<double, double>>>& polygons);
-    std::vector<std::pair<double, double>> TraceBoundary(const std::vector<std::vector<bool>>& grid, int gridWidth, int gridHeight, double minX, double minY, double stepX, double stepY);
-    double CrossProduct(const std::pair<double, double>& O, const std::pair<double, double>& A, const std::pair<double, double>& B);
-    std::vector<std::pair<double, double>> SortBoundaryPoints(const std::vector<std::pair<double, double>>& points);
+    // 向后兼容方法（将逐步迁移到PointCloudSelector）
+    void PerformCanvasBasedSelection();
+    void PerformCanvasBasedSelection(const std::vector<VectorShape*>& shapes);
 };
 
 #endif // SELECTOR_H 
