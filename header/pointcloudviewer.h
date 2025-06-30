@@ -57,6 +57,9 @@ public:
     
     // 视图锁定功能
     void enableViewLock(bool enable);
+    
+    // 矩形转多边形功能
+    bool convertRectangleToPolygon();
 
 signals:
     // 导入完成信号

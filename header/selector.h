@@ -193,13 +193,15 @@ public:
     std::string serialize() const override;
     void deserialize(const std::string& data) override;
     
+    // 获取控制点位置（公有方法，供外部访问）
+    std::vector<std::pair<double, double>> getControlPoints() const;
+    
 private:
     double x1_, y1_, x2_, y2_; // 矩形坐标
     double dragStartX_, dragStartY_; // 拖拽起始点
     double originalX1_, originalY1_, originalX2_, originalY2_; // 拖拽前的原始坐标
     
     void normalizeCoordinates(); // 确保坐标顺序正确
-    std::vector<std::pair<double, double>> getControlPoints() const; // 获取控制点位置
 };
 
 // 矢量圆形
@@ -221,12 +223,13 @@ public:
     std::string serialize() const override;
     void deserialize(const std::string& data) override;
     
+    // 获取控制点位置（公有方法，供外部访问）
+    std::vector<std::pair<double, double>> getControlPoints() const;
+    
 private:
     double centerX_, centerY_, radius_; // 圆心和半径
     double dragStartX_, dragStartY_; // 拖拽起始点
     double originalCenterX_, originalCenterY_, originalRadius_; // 拖拽前的原始值
-    
-    std::vector<std::pair<double, double>> getControlPoints() const; // 获取控制点位置
 };
 
 // 矢量多边形
@@ -400,6 +403,9 @@ public:
     
     // 图形编辑
     void DeleteSelectedShape();
+    
+    // 矩形转多边形
+    bool ConvertRectangleToPolygon();
     
     // 内部方法（供命令类调用）
     void AddShapeInternal(std::unique_ptr<VectorShape> shape);

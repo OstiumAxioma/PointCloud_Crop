@@ -39,6 +39,7 @@ private slots:
     void onClearSelection();
     void onOcclusionDetectionToggled(bool checked);
     void onViewLockToggled(bool checked);
+    void onConvertRectangleToPolygon();
     void updateStatusInfo();
 
 private:
@@ -57,6 +58,7 @@ private:
     QAction *clearCanvasAct;
     QAction *confirmSelectionAct;
     QAction *clearSelectionAct;
+    QAction *convertRectangleToPolygonAct;
 };
 
 #endif // MAINWINDOW_H 

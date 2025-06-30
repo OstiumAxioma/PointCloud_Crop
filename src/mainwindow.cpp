@@ -81,6 +81,11 @@ void MainWindow::createActions()
     clearSelectionAct = new QAction("清除选中点(&C)", this);
     clearSelectionAct->setStatusTip("清除当前选中的点云");
     connect(clearSelectionAct, &QAction::triggered, this, &MainWindow::onClearSelection);
+    
+    // 矩形转多边形动作
+    convertRectangleToPolygonAct = new QAction("矩形转多边形(&T)", this);
+    convertRectangleToPolygonAct->setStatusTip("将选中的矩形转换为多边形");
+    connect(convertRectangleToPolygonAct, &QAction::triggered, this, &MainWindow::onConvertRectangleToPolygon);
 }
 
 void MainWindow::createMenus()
@@ -110,6 +115,7 @@ void MainWindow::createToolBars()
     fileToolBar->addAction(clearCanvasAct);
     fileToolBar->addAction(confirmSelectionAct);
     fileToolBar->addAction(clearSelectionAct);
+    fileToolBar->addAction(convertRectangleToPolygonAct);
     fileToolBar->addSeparator();
 
     // 添加遮挡检测的复选框
@@ -296,6 +302,17 @@ void MainWindow::onViewLockToggled(bool checked)
     } else {
         statusBar()->showMessage("画布已解锁，启用视图操作", 2000);
     }
+}
+
+void MainWindow::onConvertRectangleToPolygon()
+{
+    bool success = pointCloudViewer->convertRectangleToPolygon();
+    if (success) {
+        statusBar()->showMessage("矩形已成功转换为多边形", 2000);
+    } else {
+        statusBar()->showMessage("转换失败：请先选中一个矩形", 2000);
+    }
+    updateStatusInfo();
 }
 
 void MainWindow::updateStatusInfo()

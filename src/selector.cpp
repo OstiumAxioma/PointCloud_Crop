@@ -1644,6 +1644,61 @@ void Selector::DeleteSelectedShape()
     qDebug() << "已删除选中的图形";
 }
 
+bool Selector::ConvertRectangleToPolygon()
+{
+    // 1. 检查是否有选中的图形且为矩形
+    if (!selectedShape_) {
+        qDebug() << "没有选中的图形";
+        return false;
+    }
+    
+    if (selectedShape_->getType() != SelectionShape::Rectangle) {
+        qDebug() << "选中的图形不是矩形，无法转换";
+        return false;
+    }
+    
+    // 2. 获取矩形的四个角点
+    VectorRectangle* rectangle = static_cast<VectorRectangle*>(selectedShape_);
+    auto controlPoints = rectangle->getControlPoints();
+    
+    // 前4个点是矩形的四个角点：左上、右上、右下、左下
+    std::vector<std::pair<double, double>> polygonVertices = {
+        controlPoints[0], // 左上角
+        controlPoints[1], // 右上角  
+        controlPoints[2], // 右下角
+        controlPoints[3]  // 左下角
+    };
+    
+    qDebug() << "矩形角点：" 
+             << "(" << controlPoints[0].first << "," << controlPoints[0].second << ") "
+             << "(" << controlPoints[1].first << "," << controlPoints[1].second << ") "
+             << "(" << controlPoints[2].first << "," << controlPoints[2].second << ") "
+             << "(" << controlPoints[3].first << "," << controlPoints[3].second << ")";
+    
+    // 3. 创建新的多边形对象
+    auto newPolygon = std::make_unique<VectorPolygon>(polygonVertices);
+    
+    // 4. 保存矩形的索引位置以便在同一位置插入多边形
+    size_t rectangleIndex = GetShapeIndex(selectedShape_);
+    
+    // 5. 创建组合命令：删除矩形 + 添加多边形
+    // 先删除矩形
+    auto deleteCommand = std::make_unique<DeleteShapeCommand>(this, selectedShape_);
+    ExecuteCommand(std::move(deleteCommand));
+    
+    // 再在相同位置添加多边形
+    auto addCommand = std::make_unique<AddShapeCommand>(this, std::move(newPolygon));
+    ExecuteCommand(std::move(addCommand));
+    
+    // 6. 选中新创建的多边形
+    if (rectangleIndex < vectorShapes_.size()) {
+        SelectShape(vectorShapes_[rectangleIndex].get());
+    }
+    
+    qDebug() << "矩形已成功转换为多边形";
+    return true;
+}
+
 void Selector::AddShapeInternal(std::unique_ptr<VectorShape> shape)
 {
     vectorShapes_.push_back(std::move(shape));

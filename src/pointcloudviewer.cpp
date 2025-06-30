@@ -276,4 +276,12 @@ void PointCloudViewer::enableViewLock(bool enable)
     if (rectangleSelector) {
         rectangleSelector->EnableViewLock(enable);
     }
+}
+
+bool PointCloudViewer::convertRectangleToPolygon()
+{
+    if (rectangleSelector) {
+        return rectangleSelector->ConvertRectangleToPolygon();
+    }
+    return false;
 } 
