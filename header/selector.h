@@ -23,6 +23,11 @@
 #include <vtkProperty2D.h>
 #include <vtkLookupTable.h>
 #include <vtkDataArray.h>
+#include <vtkHardwareSelector.h>
+#include <vtkSelection.h>
+#include <vtkSelectionNode.h>
+#include <vtkIdTypeArray.h>
+#include <vtkRenderWindow.h>
 #include <QObject>
 #include <functional>
 #include <vector>
@@ -272,6 +277,7 @@ public:
     void setRenderer(vtkRenderer* renderer) { renderer_ = renderer; }
     void setPointCloudData(vtkPolyData* pointData) { originalPointData_ = pointData; }
     void setOcclusionDetectionEnabled(bool enabled) { occlusionDetectionEnabled_ = enabled; }
+    void setUseHardwareSelection(bool enabled) { useHardwareSelection_ = enabled; }
     
     // 主要选择方法
     std::vector<vtkIdType> selectPointsByShapes(const std::vector<VectorShape*>& shapes);
@@ -289,6 +295,9 @@ private:
                                                const std::map<vtkIdType, std::pair<double, double>>& screenPositions,
                                                const std::map<vtkIdType, double>& distancesToCamera);
     
+    // 新的硬件选择方法
+    std::vector<vtkIdType> selectVisiblePointsHardware(const std::vector<VectorShape*>& shapes);
+    
     // 辅助方法
     bool isPointInShapes(double screenX, double screenY, const std::vector<VectorShape*>& shapes);
     double calculateScreenDistance(double x1, double y1, double x2, double y2);
@@ -300,6 +309,7 @@ private:
     vtkRenderer* renderer_;
     vtkPolyData* originalPointData_;
     bool occlusionDetectionEnabled_;
+    bool useHardwareSelection_;
     std::vector<vtkIdType> selectedPointIds_;
     std::vector<unsigned char> originalColorBackup_;
 };

@@ -18,9 +18,12 @@
 #include <vtkMath.h>
 #include <vtkVertex.h>
 #include <QDebug>
+#include <QString>
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <chrono>
+#include <set>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -522,7 +525,7 @@ void VectorPolygon::deserialize(const std::string& data) {
 //=============================================================================
 
 PointCloudSelector::PointCloudSelector(vtkRenderer* renderer, vtkPolyData* pointData)
-    : renderer_(renderer), originalPointData_(pointData), occlusionDetectionEnabled_(true) {
+    : renderer_(renderer), originalPointData_(pointData), occlusionDetectionEnabled_(true), useHardwareSelection_(true) {
 }
 
 std::vector<vtkIdType> PointCloudSelector::selectPointsByShapes(const std::vector<VectorShape*>& shapes) {
@@ -530,6 +533,12 @@ std::vector<vtkIdType> PointCloudSelector::selectPointsByShapes(const std::vecto
         return {};
     }
     
+    // 使用硬件选择
+    if (useHardwareSelection_ && occlusionDetectionEnabled_) {
+        return selectVisiblePointsHardware(shapes);
+    }
+    
+    // 原有的软件选择方法
     std::vector<vtkIdType> candidatePoints = collectCandidatePoints(shapes);
     
     if (candidatePoints.empty()) {
@@ -842,6 +851,187 @@ bool PointCloudSelector::isPointOccluded(vtkIdType pointId, const std::vector<vt
     }
     
     return false;
+}
+
+// 使用硬件选择器进行可见点选择
+std::vector<vtkIdType> PointCloudSelector::selectVisiblePointsHardware(const std::vector<VectorShape*>& shapes) {
+    if (!renderer_ || !originalPointData_ || shapes.empty()) {
+        return {};
+    }
+    
+    qDebug() << "开始硬件选择（优化版）...";
+    auto startTime = std::chrono::high_resolution_clock::now();
+    
+    // 获取渲染窗口
+    vtkRenderWindow* renderWindow = renderer_->GetRenderWindow();
+    if (!renderWindow) {
+        qDebug() << "错误：无法获取渲染窗口";
+        return {};
+    }
+    
+    // 首先收集候选点（在选择框内的点）
+    std::vector<vtkIdType> candidatePoints = collectCandidatePoints(shapes);
+    qDebug() << "候选点数：" << candidatePoints.size();
+    
+    if (candidatePoints.empty()) {
+        return {};
+    }
+    
+    // 确保场景已经渲染
+    renderWindow->Render();
+    
+    // 方案2：改进的硬件选择，对每个形状单独处理
+    std::vector<vtkIdType> visiblePoints;
+    std::set<vtkIdType> processedPoints; // 避免重复处理
+    
+    // 获取点云actor以获取渲染属性
+    vtkActor* pointCloudActor = nullptr;
+    vtkActorCollection* actors = renderer_->GetActors();
+    actors->InitTraversal();
+    vtkActor* actor = nullptr;
+    while ((actor = actors->GetNextActor())) {
+        if (actor->GetMapper() && actor->GetMapper()->GetInput() == originalPointData_) {
+            pointCloudActor = actor;
+            break;
+        }
+    }
+    
+    double pointSize = 1.0;
+    if (pointCloudActor && pointCloudActor->GetProperty()) {
+        pointSize = pointCloudActor->GetProperty()->GetPointSize();
+        qDebug() << "点渲染大小：" << pointSize;
+    }
+    
+    // 对每个形状分别处理，以提高精度
+    for (const auto* shape : shapes) {
+        // 收集该形状内的候选点
+        std::vector<vtkIdType> shapeCandidate;
+        vtkPoints* points = originalPointData_->GetPoints();
+        
+        for (vtkIdType pointId : candidatePoints) {
+            if (processedPoints.find(pointId) != processedPoints.end()) {
+                continue; // 已处理过
+            }
+            
+            double point[3];
+            points->GetPoint(pointId, point);
+            
+            double screenPoint[3];
+            renderer_->SetWorldPoint(point[0], point[1], point[2], 1.0);
+            renderer_->WorldToDisplay();
+            renderer_->GetDisplayPoint(screenPoint);
+            
+            // 只检查当前形状
+            std::vector<VectorShape*> singleShape = {const_cast<VectorShape*>(shape)};
+            if (isPointInShapes(screenPoint[0], screenPoint[1], singleShape)) {
+                shapeCandidate.push_back(pointId);
+            }
+        }
+        
+        if (shapeCandidate.empty()) continue;
+        
+        // 计算该形状候选点的屏幕边界
+        double minX = std::numeric_limits<double>::max();
+        double minY = std::numeric_limits<double>::max();
+        double maxX = std::numeric_limits<double>::lowest();
+        double maxY = std::numeric_limits<double>::lowest();
+        
+        for (vtkIdType pointId : shapeCandidate) {
+            double point[3];
+            points->GetPoint(pointId, point);
+            
+            double screenPoint[3];
+            renderer_->SetWorldPoint(point[0], point[1], point[2], 1.0);
+            renderer_->WorldToDisplay();
+            renderer_->GetDisplayPoint(screenPoint);
+            
+            minX = std::min(minX, screenPoint[0]);
+            minY = std::min(minY, screenPoint[1]);
+            maxX = std::max(maxX, screenPoint[0]);
+            maxY = std::max(maxY, screenPoint[1]);
+        }
+        
+        // 根据点的渲染大小扩展边界
+        double margin = std::max(5.0, pointSize * 2.0);
+        minX = std::max(0.0, minX - margin);
+        minY = std::max(0.0, minY - margin);
+        maxX = maxX + margin;
+        maxY = maxY + margin;
+    
+    // 创建硬件选择器
+    vtkSmartPointer<vtkHardwareSelector> selector = vtkSmartPointer<vtkHardwareSelector>::New();
+    selector->SetRenderer(renderer_);
+    selector->SetFieldAssociation(vtkDataObject::FIELD_ASSOCIATION_POINTS);
+    
+    // 设置选择区域
+    int* windowSize = renderWindow->GetSize();
+    unsigned int x0 = static_cast<unsigned int>(minX);
+    unsigned int y0 = static_cast<unsigned int>(windowSize[1] - maxY); // Y坐标翻转
+    unsigned int x1 = static_cast<unsigned int>(maxX);
+    unsigned int y1 = static_cast<unsigned int>(windowSize[1] - minY); // Y坐标翻转
+    
+    // 确保坐标在窗口范围内
+    x0 = std::min(x0, static_cast<unsigned int>(windowSize[0] - 1));
+    y0 = std::min(y0, static_cast<unsigned int>(windowSize[1] - 1));
+    x1 = std::min(x1, static_cast<unsigned int>(windowSize[0] - 1));
+    y1 = std::min(y1, static_cast<unsigned int>(windowSize[1] - 1));
+    
+    qDebug() << QString("选择区域: (%1,%2) - (%3,%4)").arg(x0).arg(y0).arg(x1).arg(y1);
+    
+    // 执行区域选择
+    selector->SetArea(x0, y0, x1, y1);
+    vtkSmartPointer<vtkSelection> selection = selector->Select();
+    
+    std::vector<vtkIdType> visiblePoints;
+    
+    if (selection) {
+        // 收集所有被选中的点
+        std::set<vtkIdType> selectedIds;
+        unsigned int numNodes = selection->GetNumberOfNodes();
+        
+        for (unsigned int nodeIdx = 0; nodeIdx < numNodes; nodeIdx++) {
+            vtkSelectionNode* node = selection->GetNode(nodeIdx);
+            vtkIdTypeArray* selectionIds = vtkIdTypeArray::SafeDownCast(
+                node->GetSelectionList());
+            
+            if (selectionIds) {
+                for (vtkIdType i = 0; i < selectionIds->GetNumberOfTuples(); i++) {
+                    selectedIds.insert(selectionIds->GetValue(i));
+                }
+            }
+        }
+        
+        qDebug() << "硬件选择返回了" << selectedIds.size() << "个点";
+        
+        // 过滤出既在选择框内又被硬件选择的点
+        for (vtkIdType pointId : candidatePoints) {
+            if (selectedIds.find(pointId) != selectedIds.end()) {
+                // 再次确认点在选择框内（双重检查）
+                double point[3];
+                points->GetPoint(pointId, point);
+                
+                double screenPoint[3];
+                renderer_->SetWorldPoint(point[0], point[1], point[2], 1.0);
+                renderer_->WorldToDisplay();
+                renderer_->GetDisplayPoint(screenPoint);
+                
+                if (isPointInShapes(screenPoint[0], screenPoint[1], shapes)) {
+                    visiblePoints.push_back(pointId);
+                }
+            }
+        }
+    }
+    
+    // 添加到已选中点列表
+    addSelectedPoints(visiblePoints);
+    
+    auto endTime = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    
+    qDebug() << "硬件选择完成，用时：" << duration.count() << "ms";
+    qDebug() << "候选点：" << candidatePoints.size() << "，可见点：" << visiblePoints.size();
+    
+    return visiblePoints;
 }
 
 //=============================================================================
