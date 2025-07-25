@@ -727,6 +727,9 @@ std::vector<vtkIdType> PointCloudSelector::filterOccludedPoints(const std::vecto
 
 void PointCloudSelector::highlightSelectedPoints(const std::vector<vtkIdType>& selectedPointIds) {
     if (!renderer_ || !originalPointData_) return;
+    
+    // 注意：参数selectedPointIds被忽略，始终使用成员变量selectedPointIds_
+    // 这样可以保持累积选择的效果
 
     // 获取原始点云的颜色数据或标量数据
     vtkUnsignedCharArray* originalColors = vtkUnsignedCharArray::SafeDownCast(
@@ -799,8 +802,8 @@ void PointCloudSelector::highlightSelectedPoints(const std::vector<vtkIdType>& s
         color[2] = originalColorBackup_[i * 3 + 2];
     }
 
-    // 将选中的点设置为红色
-    for (vtkIdType id : selectedPointIds) {
+    // 将选中的点设置为红色（使用累积的选中点列表）
+    for (vtkIdType id : selectedPointIds_) {
         if (id < originalColors->GetNumberOfTuples()) {
             unsigned char* color = originalColors->GetPointer(id * 3);
             color[0] = 255; // 红色
@@ -815,7 +818,7 @@ void PointCloudSelector::highlightSelectedPoints(const std::vector<vtkIdType>& s
     // 刷新渲染
     renderer_->GetRenderWindow()->Render();
 
-    qDebug() << "已高亮" << selectedPointIds.size() << "个点";
+    qDebug() << "已高亮" << selectedPointIds_.size() << "个点";
 }
 
 void PointCloudSelector::clearAllSelectedPoints() {
@@ -848,7 +851,12 @@ void PointCloudSelector::clearAllSelectedPoints() {
 }
 
 void PointCloudSelector::addSelectedPoints(const std::vector<vtkIdType>& points) {
-    selectedPointIds_.insert(selectedPointIds_.end(), points.begin(), points.end());
+    // 使用set来去重
+    std::set<vtkIdType> uniquePoints(selectedPointIds_.begin(), selectedPointIds_.end());
+    uniquePoints.insert(points.begin(), points.end());
+    
+    // 更新选中点列表
+    selectedPointIds_.assign(uniquePoints.begin(), uniquePoints.end());
 }
 
 double PointCloudSelector::calculateScreenDistance(double x1, double y1, double x2, double y2) {
