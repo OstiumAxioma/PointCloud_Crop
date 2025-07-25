@@ -278,6 +278,7 @@ public:
     void setPointCloudData(vtkPolyData* pointData) { originalPointData_ = pointData; }
     void setOcclusionDetectionEnabled(bool enabled) { occlusionDetectionEnabled_ = enabled; }
     void setUseHardwareSelection(bool enabled) { useHardwareSelection_ = enabled; }
+    void setUseHybridSelection(bool enabled) { useHybridSelection_ = enabled; }
     
     // 主要选择方法
     std::vector<vtkIdType> selectPointsByShapes(const std::vector<VectorShape*>& shapes);
@@ -298,6 +299,9 @@ private:
     // 新的硬件选择方法
     std::vector<vtkIdType> selectVisiblePointsHardware(const std::vector<VectorShape*>& shapes);
     
+    // 使用可见性过滤的方法
+    std::vector<vtkIdType> selectVisiblePointsWithFilter(const std::vector<VectorShape*>& shapes);
+    
     // 辅助方法
     bool isPointInShapes(double screenX, double screenY, const std::vector<VectorShape*>& shapes);
     double calculateScreenDistance(double x1, double y1, double x2, double y2);
@@ -310,6 +314,7 @@ private:
     vtkPolyData* originalPointData_;
     bool occlusionDetectionEnabled_;
     bool useHardwareSelection_;
+    bool useHybridSelection_;
     std::vector<vtkIdType> selectedPointIds_;
     std::vector<unsigned char> originalColorBackup_;
 };

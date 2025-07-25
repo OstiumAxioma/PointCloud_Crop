@@ -17,6 +17,9 @@
 #include <vtkLookupTable.h>
 #include <vtkMath.h>
 #include <vtkVertex.h>
+#include <vtkActorCollection.h>
+#include <vtkProperty.h>
+#include <vtkPolyDataMapper.h>
 #include <QDebug>
 #include <QString>
 #include <algorithm>
@@ -525,7 +528,8 @@ void VectorPolygon::deserialize(const std::string& data) {
 //=============================================================================
 
 PointCloudSelector::PointCloudSelector(vtkRenderer* renderer, vtkPolyData* pointData)
-    : renderer_(renderer), originalPointData_(pointData), occlusionDetectionEnabled_(true), useHardwareSelection_(true) {
+    : renderer_(renderer), originalPointData_(pointData), occlusionDetectionEnabled_(true), 
+      useHardwareSelection_(true), useHybridSelection_(true) {
 }
 
 std::vector<vtkIdType> PointCloudSelector::selectPointsByShapes(const std::vector<VectorShape*>& shapes) {
@@ -535,7 +539,8 @@ std::vector<vtkIdType> PointCloudSelector::selectPointsByShapes(const std::vecto
     
     // 使用硬件选择
     if (useHardwareSelection_ && occlusionDetectionEnabled_) {
-        return selectVisiblePointsHardware(shapes);
+        // 暂时禁用，使用改进的软件选择
+        // return selectVisiblePointsHardware(shapes);
     }
     
     // 原有的软件选择方法
@@ -583,6 +588,12 @@ std::vector<vtkIdType> PointCloudSelector::selectPointsByShapes(const std::vecto
     addSelectedPoints(visiblePoints);
     
     qDebug() << "点云选择完成：候选点" << candidatePoints.size() << "个，可见点" << visiblePoints.size() << "个，总选中" << selectedPointIds_.size() << "个";
+    
+    // 调试信息：如果选中率过低，输出警告
+    double selectionRate = (double)visiblePoints.size() / candidatePoints.size();
+    if (selectionRate < 0.7) {
+        qDebug() << QString("警告：选中率较低 (%1%)，可能存在遮挡检测问题").arg(selectionRate * 100, 0, 'f', 1);
+    }
     
     return visiblePoints;
 }
@@ -633,7 +644,7 @@ std::vector<vtkIdType> PointCloudSelector::filterOccludedPoints(const std::vecto
     
     // 基于深度缓冲的遮挡检测
     std::vector<vtkIdType> visiblePoints;
-    double pixelThreshold = 6.0; // 像素距离阈值
+    double pixelThreshold = 4.0; // 减小像素距离阈值，提高精度
     
     // 创建深度缓冲区（简化为距离映射）
     std::map<std::pair<int, int>, double> depthBuffer; // (pixelX, pixelY) -> minDistance
@@ -660,9 +671,31 @@ std::vector<vtkIdType> PointCloudSelector::filterOccludedPoints(const std::vecto
                 auto bufferIt = depthBuffer.find(std::make_pair(checkX, checkY));
                 if (bufferIt != depthBuffer.end()) {
                     double existingDistance = bufferIt->second;
-                    // 如果已有更近的点，且距离差异足够大，认为被遮挡
-                    if (existingDistance < pointDistance && 
-                        (pointDistance - existingDistance) / existingDistance > 0.02) {
+                    
+                    // 改进的遮挡判断：考虑点的密度和角度
+                    double depthDiff = pointDistance - existingDistance;
+                    double relativeDepthDiff = depthDiff / existingDistance;
+                    
+                    // 计算屏幕距离
+                    double screenDist = sqrt(dx * dx + dy * dy);
+                    
+                    // 动态阈值：距离越近，阈值越大（允许更多倾斜）
+                    double dynamicThreshold = 0.02; // 基础阈值
+                    
+                    // 如果点很近（在3像素内），使用更宽松的阈值
+                    if (screenDist < 3.0) {
+                        dynamicThreshold = 0.05; // 允许5%的深度差异
+                    } else if (screenDist < pixelThreshold * 0.5) {
+                        dynamicThreshold = 0.03; // 允许3%的深度差异
+                    }
+                    
+                    // 只有当深度差异超过动态阈值时才认为被遮挡
+                    if (existingDistance < pointDistance && relativeDepthDiff > dynamicThreshold) {
+                        // 额外检查：如果深度差异很小，可能是同一表面
+                        if (depthDiff < 0.5 && screenDist < 2.0) {
+                            // 很可能是同一表面的相邻点，不算遮挡
+                            continue;
+                        }
                         isOccluded = true;
                         break;
                     }
@@ -957,66 +990,108 @@ std::vector<vtkIdType> PointCloudSelector::selectVisiblePointsHardware(const std
         minY = std::max(0.0, minY - margin);
         maxX = maxX + margin;
         maxY = maxY + margin;
-    
-    // 创建硬件选择器
-    vtkSmartPointer<vtkHardwareSelector> selector = vtkSmartPointer<vtkHardwareSelector>::New();
-    selector->SetRenderer(renderer_);
-    selector->SetFieldAssociation(vtkDataObject::FIELD_ASSOCIATION_POINTS);
-    
-    // 设置选择区域
-    int* windowSize = renderWindow->GetSize();
-    unsigned int x0 = static_cast<unsigned int>(minX);
-    unsigned int y0 = static_cast<unsigned int>(windowSize[1] - maxY); // Y坐标翻转
-    unsigned int x1 = static_cast<unsigned int>(maxX);
-    unsigned int y1 = static_cast<unsigned int>(windowSize[1] - minY); // Y坐标翻转
-    
-    // 确保坐标在窗口范围内
-    x0 = std::min(x0, static_cast<unsigned int>(windowSize[0] - 1));
-    y0 = std::min(y0, static_cast<unsigned int>(windowSize[1] - 1));
-    x1 = std::min(x1, static_cast<unsigned int>(windowSize[0] - 1));
-    y1 = std::min(y1, static_cast<unsigned int>(windowSize[1] - 1));
-    
-    qDebug() << QString("选择区域: (%1,%2) - (%3,%4)").arg(x0).arg(y0).arg(x1).arg(y1);
-    
-    // 执行区域选择
-    selector->SetArea(x0, y0, x1, y1);
-    vtkSmartPointer<vtkSelection> selection = selector->Select();
-    
-    std::vector<vtkIdType> visiblePoints;
-    
-    if (selection) {
-        // 收集所有被选中的点
-        std::set<vtkIdType> selectedIds;
-        unsigned int numNodes = selection->GetNumberOfNodes();
         
-        for (unsigned int nodeIdx = 0; nodeIdx < numNodes; nodeIdx++) {
-            vtkSelectionNode* node = selection->GetNode(nodeIdx);
-            vtkIdTypeArray* selectionIds = vtkIdTypeArray::SafeDownCast(
-                node->GetSelectionList());
+        // 创建硬件选择器
+        vtkSmartPointer<vtkHardwareSelector> selector = vtkSmartPointer<vtkHardwareSelector>::New();
+        selector->SetRenderer(renderer_);
+        selector->SetFieldAssociation(vtkDataObject::FIELD_ASSOCIATION_POINTS);
+        
+        // 设置选择区域
+        int* windowSize = renderWindow->GetSize();
+        unsigned int x0 = static_cast<unsigned int>(minX);
+        unsigned int y0 = static_cast<unsigned int>(windowSize[1] - maxY); // Y坐标翻转
+        unsigned int x1 = static_cast<unsigned int>(maxX);
+        unsigned int y1 = static_cast<unsigned int>(windowSize[1] - minY); // Y坐标翻转
+        
+        // 确保坐标在窗口范围内
+        x0 = std::min(x0, static_cast<unsigned int>(windowSize[0] - 1));
+        y0 = std::min(y0, static_cast<unsigned int>(windowSize[1] - 1));
+        x1 = std::min(x1, static_cast<unsigned int>(windowSize[0] - 1));
+        y1 = std::min(y1, static_cast<unsigned int>(windowSize[1] - 1));
+        
+        qDebug() << QString("形状 %1 选择区域: (%2,%3) - (%4,%5)")
+            .arg(shapes.size()).arg(x0).arg(y0).arg(x1).arg(y1);
+        
+        // 执行区域选择
+        selector->SetArea(x0, y0, x1, y1);
+        vtkSmartPointer<vtkSelection> selection = selector->Select();
+        
+        if (selection) {
+            // 收集所有被选中的点
+            std::set<vtkIdType> selectedIds;
+            unsigned int numNodes = selection->GetNumberOfNodes();
             
-            if (selectionIds) {
-                for (vtkIdType i = 0; i < selectionIds->GetNumberOfTuples(); i++) {
-                    selectedIds.insert(selectionIds->GetValue(i));
+            for (unsigned int nodeIdx = 0; nodeIdx < numNodes; nodeIdx++) {
+                vtkSelectionNode* node = selection->GetNode(nodeIdx);
+                vtkIdTypeArray* selectionIds = vtkIdTypeArray::SafeDownCast(
+                    node->GetSelectionList());
+                
+                if (selectionIds) {
+                    for (vtkIdType i = 0; i < selectionIds->GetNumberOfTuples(); i++) {
+                        selectedIds.insert(selectionIds->GetValue(i));
+                    }
                 }
             }
-        }
-        
-        qDebug() << "硬件选择返回了" << selectedIds.size() << "个点";
-        
-        // 过滤出既在选择框内又被硬件选择的点
-        for (vtkIdType pointId : candidatePoints) {
-            if (selectedIds.find(pointId) != selectedIds.end()) {
-                // 再次确认点在选择框内（双重检查）
-                double point[3];
-                points->GetPoint(pointId, point);
-                
-                double screenPoint[3];
-                renderer_->SetWorldPoint(point[0], point[1], point[2], 1.0);
-                renderer_->WorldToDisplay();
-                renderer_->GetDisplayPoint(screenPoint);
-                
-                if (isPointInShapes(screenPoint[0], screenPoint[1], shapes)) {
+            
+            qDebug() << "该形状硬件选择返回了" << selectedIds.size() << "个点";
+            
+            // 过滤出既在选择框内又被硬件选择的点
+            int missedCount = 0;
+            for (vtkIdType pointId : shapeCandidate) {
+                if (selectedIds.find(pointId) != selectedIds.end()) {
                     visiblePoints.push_back(pointId);
+                    processedPoints.insert(pointId);
+                } else {
+                    missedCount++;
+                }
+            }
+            
+            // 如果有较多点被遗漏，尝试使用混合方法
+            if (useHybridSelection_ && missedCount > shapeCandidate.size() * 0.1) {
+                qDebug() << QString("检测到 %1 个点可能被遗漏，启用混合选择").arg(missedCount);
+                
+                // 对遗漏的点进行额外检查
+                for (vtkIdType pointId : shapeCandidate) {
+                    if (processedPoints.find(pointId) != processedPoints.end()) {
+                        continue; // 已处理
+                    }
+                    
+                    double point[3];
+                    points->GetPoint(pointId, point);
+                    
+                    // 检查周围是否有已选中的点
+                    bool hasNearbySelected = false;
+                    double checkRadius = 5.0; // 像素
+                    
+                    double screenPoint[3];
+                    renderer_->SetWorldPoint(point[0], point[1], point[2], 1.0);
+                    renderer_->WorldToDisplay();
+                    renderer_->GetDisplayPoint(screenPoint);
+                    
+                    // 检查周围已选中的点
+                    for (vtkIdType selectedId : visiblePoints) {
+                        double selectedPoint[3];
+                        points->GetPoint(selectedId, selectedPoint);
+                        
+                        double selectedScreen[3];
+                        renderer_->SetWorldPoint(selectedPoint[0], selectedPoint[1], selectedPoint[2], 1.0);
+                        renderer_->WorldToDisplay();
+                        renderer_->GetDisplayPoint(selectedScreen);
+                        
+                        double dist = sqrt(pow(screenPoint[0] - selectedScreen[0], 2) + 
+                                         pow(screenPoint[1] - selectedScreen[1], 2));
+                        
+                        if (dist < checkRadius) {
+                            hasNearbySelected = true;
+                            break;
+                        }
+                    }
+                    
+                    // 如果周围有选中的点，且在相似深度，则也选中该点
+                    if (hasNearbySelected) {
+                        visiblePoints.push_back(pointId);
+                        processedPoints.insert(pointId);
+                    }
                 }
             }
         }
